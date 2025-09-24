@@ -1,0 +1,5 @@
+# /workspace-root/.cargo/config.toml
+[env]
+BLAS_INCLUDE_DIRS = { value = "/usr/include/openblas:/usr/include" }
+BLAS_LIB_DIRS     = { value = "/usr/lib" }
+OPENBLAS_NUM_THREADS = { value = "1" }

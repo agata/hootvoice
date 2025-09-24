@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HootVoice — ユーザーマニュアル</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="lang-switch small"><a href="manual.html">English</a></div>
+      <nav class="doc-nav small">
+        <a class="btn" href="index.ja.html"><i data-lucide="home" aria-hidden="true"></i>トップページ</a>
+        <a class="btn" href="manual.ja.html"><i data-lucide="book" aria-hidden="true"></i>ユーザーマニュアル</a>
+      </nav>
+      <div class="container">
+        <h1>HootVoice — ユーザーマニュアル</h1>
+      </div>
+    </header>
+    <main class="container">
+      <nav class="toc">
+        <h2>目次</h2>
+        <ol>
+          <li><a href="#basic">基本的な使い方</a></li>
+          <li><a href="#local">ローカル処理（クラウド不要）</a></li>
+          <li><a href="#quickstart">クイックスタート</a></li>
+          <li><a href="#toolbar">フローティングツールバー</a></li>
+          <li><a href="#settings">設定</a></li>
+          <li><a href="#flow">録音の流れ</a></li>
+          <li><a href="#tips">ヒント</a></li>
+          <li><a href="#troubleshooting">トラブルシューティング</a></li>
+          <li><a href="#update">アップデート</a></li>
+          <li><a href="#uninstall">アンインストール</a></li>
+          <li><a href="#advanced">上級者向け</a></li>
+        </ol>
+      </nav>
+      <section id="basic">
+        <h2>基本的な使い方</h2>
+        <p>OS の任意のテキスト入力欄にカーソルを置き、録音ホットキー（既定 Ctrl+Shift+R）を押して話します。録音を停止すると音声が文字起こしされ、自動ペーストが有効ならそのまま入力欄に貼り付けられます。</p>
+        <p>よく誤変換される語句は「設定 → 辞書」で登録しておくと置換できます。</p>
+      </section>
+      <section id="local">
+        <h2>ローカル処理（クラウド不要）</h2>
+        <p>HootVoice の音声認識は、端末上（ローカル）で完結します。音声データを外部サーバに送信しません。</p>
+        <ul>
+          <li>プライバシー: 会議内容や機密情報がクラウドに送られません。</li>
+          <li>速度安定: ネットワーク待ち時間の影響を受けず、CPU/GPU の性能に依存して高速に動作します。</li>
+          <li>コスト: API 利用料は不要です（無料で利用可能）。</li>
+          <li>ネットワーク使用について: 初回に Whisper モデルをダウンロードする場合のみ通信します。オフライン環境でも、あらかじめ <code>models/</code> にモデルを配置しておけば利用できます。</li>
+        </ul>
+      </section>
+      <section id="quickstart">
+        <h2>クイックスタート</h2>
+        <ul>
+          <li>Windows: <code>hootvoice.exe</code> を実行</li>
+          <li>macOS/Linux: <code>./hootvoice</code> を実行（配布物の <code>dist/</code> からでも可）</li>
+        </ul>
+        <p>初回起動時、選択中の Whisper モデルがユーザー設定ディレクトリに自動ダウンロードされます（既定 Large‑v3 約 3.1GB）。モデルは「設定 → 音声モデル」で変更できます。</p>
+        <p>Whisper モデルおよび ggml 変換版は OpenAI によって MIT License で提供されています。ダウンロードしたモデルを再配布する場合は、<a href="https://github.com/openai/whisper#license">Whisper リポジトリのライセンス表記</a> を必ず確認してください。</p>
+        <p>既定操作:</p>
+        <ul>
+          <li>録音トグル: Ctrl+Shift+R（設定 → 一般 で変更可）</li>
+          <li>Linux/macOS: <code>SIGUSR1</code> で録音トグル、<code>SIGUSR2</code> で設定表示</li>
+        </ul>
+      </section>
+      <section id="toolbar">
+        <h2>フローティングツールバー</h2>
+        <p>常時前面に小さなウィンドウが表示され、状態表示と録音/停止ボタン、設定ボタン、ドラッグ用グリップを備えます。</p>
+        <ul>
+          <li>状態: 待機（○）/ 録音（● 赤）/ 処理中（● 黄）</li>
+          <li>Wayland: <code>wayland_layer</code> 機能でサイドカー（<code>hootvoice-float</code>）が layer‑shell で動作します（パネルのような振る舞い）。</li>
+        </ul>
+        <p>ヒント: 設定画面から「フローティング表示」に切り替えられます。</p>
+      </section>
+      <section id="settings">
+        <h2>設定</h2>
+        <p>ツールバーの「設定」または起動直後に開くウィンドウから操作します。主なタブ:</p>
+        <ul>
+          <li>一般
+            <ul>
+              <li>録音ホットキー、UI 言語、自動ペーストの ON/OFF</li>
+              <li>フローティング表示に切替 / モデル／辞書フォルダを開く</li>
+            </ul>
+          </li>
+          <li>デバイス
+            <ul>
+              <li>入力デバイス/ホスト、出力デバイスの選択</li>
+              <li>入力レベルメーター、感度（ゲイン）</li>
+              <li>テスト録音でマイク動作を確認</li>
+            </ul>
+          </li>
+          <li>音声モデル
+            <ul>
+              <li>プリセット（Tiny/Base/Small/Medium/Large‑v3）と品質/速度の目安</li>
+              <li>選択モデルのダウンロード/適用、モデルフォルダの確認</li>
+            </ul>
+          </li>
+          <li>辞書
+            <ul>
+              <li>標準形、別名、適用条件（Include）で語句置換を定義</li>
+              <li>検索、追加/編集/削除、適用ボタンで反映</li>
+            </ul>
+          </li>
+          <li>ログ
+            <ul>
+              <li>録音/処理/コピー/ペーストなどのログを時刻付きで表示</li>
+            </ul>
+          </li>
+        </ul>
+        <p>変更は自動保存されます。モデル/辞書は「適用」ボタンでコアに反映します。</p>
+      </section>
+      <section id="flow">
+        <h2>録音の流れ</h2>
+        <ol>
+          <li>ホットキーまたはツールバーで録音開始</li>
+          <li>話す（経過時間とレベルが表示）</li>
+          <li>停止で音声認識を実行</li>
+          <li>結果をクリップボードにコピーし、（有効なら）前面アプリへ自動ペースト</li>
+        </ol>
+        <p>注意:</p>
+        <ul>
+          <li>macOS の自動ペーストにはアクセシビリティ＋オートメーション権限が必要</li>
+          <li>Linux の自動ペーストには Wayland: <code>wtype</code>／X11: <code>xdotool</code> が必要（無い場合はコピーのみ）</li>
+        </ul>
+      </section>
+      <section id="tips">
+        <h2>ヒント</h2>
+        <ul>
+          <li>低スペック環境では Tiny〜Small など軽量モデルを選ぶと高速</li>
+          <li>Linux/Windows は Vulkan による GPU アクセラレーションで大幅に高速化（ランタイム/ドライバと <code>glslc</code> を導入）</li>
+          <li>macOS は Metal/Core ML が自動で使用されます</li>
+        </ul>
+      </section>
+      <section id="troubleshooting">
+        <h2>トラブルシューティング</h2>
+        <ul>
+          <li>macOS の自動ペーストが効かない
+            <ul>
+              <li>システム設定 → プライバシーとセキュリティ</li>
+              <li>アクセビリティ: “HootVoice” を許可</li>
+              <li>オートメーション: “HootVoice” → “System Events” を許可</li>
+            </ul>
+          </li>
+          <li>Linux で自動ペーストが無反応
+            <ul>
+              <li>Wayland は <code>wtype</code>、X11 は <code>xdotool</code> を導入。未導入時はコピーのみ。</li>
+            </ul>
+          </li>
+          <li>Linux の Vulkan ビルド／実行で問題
+            <ul>
+              <li><code>glslc libvulkan-dev vulkan-tools mesa-vulkan-drivers</code> を導入（Ubuntu 24.04 例）し、<code>vulkaninfo</code> で確認</li>
+            </ul>
+          </li>
+          <li>マイクが表示されない
+            <ul>
+              <li><code>aplay -l</code> / <code>arecord -l</code> とオーディオサーバの設定を確認</li>
+            </ul>
+          </li>
+        </ul>
+      </section>
+      <section id="update">
+        <h2>アップデート</h2>
+        <p>最新リリースを公式サイトや配布ページからダウンロードし、既存のアプリケーションに上書きしてください。設定やモデルはユーザーデータディレクトリに残るため再設定は不要です。現在自動アップデート機能はありません。</p>
+      </section>
+      <section id="uninstall">
+        <h2>アンインストール</h2>
+        <p>アプリ本体を削除し、必要ならユーザーデータも削除してモデル容量を解放:</p>
+        <ul>
+          <li>Linux: <code>~/.config/HootVoice</code></li>
+          <li>macOS: <code>~/Library/Application Support/HootVoice</code></li>
+          <li>Windows: <code>%APPDATA%\HootVoice</code></li>
+        </ul>
+      </section>
+      <section id="advanced">
+        <h2>上級者向け</h2>
+        <ul>
+          <li>Waybar 連携
+            <ul>
+              <li>ステータスを OS 標準の設定ディレクトリ（例: <code>~/.config/HootVoice/status.json</code>）に出力</li>
+              <li>Waybar のカスタムモジュールで定期的に読み込む構成が可能</li>
+            </ul>
+          </li>
+        </ul>
+        <p>HootVoice で、より快適な音声入力を！</p>
+      </section>
+    </main>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>lucide.createIcons();</script>
+  </body>
+</html>

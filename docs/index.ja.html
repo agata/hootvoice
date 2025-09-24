@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HootVoice — リアルタイム音声入力</title>
+    <meta name="description" content="HootVoice は Whisper を活用した高速でプライベートな音声入力アプリ。フローティングツールバー、デバイス制御、ユーザー辞書を備え、macOS・Windows・Linux でローカル完結の音声タイピングを実現します。" />
+    <meta name="keywords" content="音声入力,文字起こし,Whisper,オフライン,プライバシー" />
+    <meta name="application-name" content="HootVoice" />
+    <meta name="theme-color" content="#3b53ff" />
+    <link rel="canonical" href="https://hootvoice.com/index.ja.html" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="HootVoice" />
+    <meta property="og:title" content="HootVoice — リアルタイム音声入力" />
+    <meta property="og:description" content="HootVoice は Whisper を活用した高速でプライベートな音声入力アプリ。フローティングツールバー、デバイス制御、ユーザー辞書を備え、macOS・Windows・Linux でローカル完結の音声タイピングを実現します。" />
+    <meta property="og:url" content="https://hootvoice.com/index.ja.html" />
+    <meta property="og:locale" content="ja_JP" />
+    <meta property="og:image" content="https://hootvoice.com/img/hootvoice.png" />
+    <meta property="og:image:alt" content="HootVoice のフローティングツールバーとリアルタイム文字起こし画面" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="HootVoice — リアルタイム音声入力" />
+    <meta name="twitter:description" content="HootVoice は Whisper を活用した高速でプライベートな音声入力アプリ。フローティングツールバー、デバイス制御、ユーザー辞書を備え、macOS・Windows・Linux でローカル完結の音声タイピングを実現します。" />
+    <meta name="twitter:image" content="https://hootvoice.com/img/hootvoice.png" />
+    <meta name="twitter:image:alt" content="HootVoice のフローティングツールバーとリアルタイム文字起こし画面" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="lang-switch small"><a href="index.html">English</a></div>
+      <nav class="doc-nav small">
+        <a class="btn" href="index.ja.html"><i data-lucide="home" aria-hidden="true"></i>トップページ</a>
+        <a class="btn" href="manual.ja.html"><i data-lucide="book" aria-hidden="true"></i>ユーザーマニュアル</a>
+        <a class="btn" href="https://github.com/agata/hootvoice"><i data-lucide="github" aria-hidden="true"></i>GitHub</a>
+      </nav>
+      <div class="container">
+        <h1><img src="./img/hootvoice.png" alt="HootVoice ロゴ" class="logo" />HootVoice</h1>
+        <p class="tagline">音声で文字入力。<br />プライバシーを守る設計。</p>
+        <p class="lead">Whisper による高速かつプライベートな音声入力。小さなフローティングツールバー、デバイス制御、ユーザー辞書を備えています。すべてローカルで完結し、APIキー不要、無料で使えます。</p>
+        <div class="cta" style="gap: 8px; flex-wrap: wrap;">
+          <a class="btn primary" href="https://github.com/agata/hootvoice/releases/latest/download/HootVoice-windows-x86_64.exe"><i data-lucide="download" aria-hidden="true"></i>Windows (x86_64)</a>
+          <a class="btn primary" href="https://github.com/agata/hootvoice/releases/latest/download/HootVoice-macos-arm64.dmg"><i data-lucide="download" aria-hidden="true"></i>macOS (arm64)</a>
+          <a class="btn primary" href="https://github.com/agata/hootvoice/releases/latest/download/HootVoice-linux-x86_64.AppImage"><i data-lucide="download" aria-hidden="true"></i>Linux AppImage (x86_64)</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+      <section>
+        <h2>なぜ HootVoice？</h2>
+        <div class="grid features">
+          <div class="feature">
+            <i data-lucide="zap" aria-hidden="true"></i>
+            <h3>驚くほど高速</h3>
+            <p>最適化された Whisper の文字起こしは、あなたの思考の速さに追いつきます。</p>
+          </div>
+          <div class="feature">
+            <i data-lucide="shield" aria-hidden="true"></i>
+            <h3>プライベートかつローカル</h3>
+            <p>すべてがあなたのマシン上で完結し、データが外部に送られることはありません。</p>
+          </div>
+          <div class="feature">
+            <i data-lucide="workflow" aria-hidden="true"></i>
+            <i data-lucide="keyboard" aria-hidden="true"></i>
+            <h3>手間いらずのワークフロー</h3>
+            <p>グローバルホットキー、自動コピー&ペースト、カスタム辞書、音量調整可能なステータスサウンド。</p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>はじめに</h2>
+        <ul>
+          <li>使い方のヒントは <a href="manual.ja.html">ユーザーマニュアル</a> をご覧ください</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>動作条件</h2>
+        <ul>
+          <li>macOS: macOS&nbsp;12 以降を実行する Apple シリコン搭載 Mac</li>
+          <li>Windows: Windows&nbsp;10/11 64ビット PC（最新の GPU ドライバー推奨）</li>
+          <li>Linux: Vulkan ランタイム/ドライバー、<code>glslc</code>、<code>libopenblas</code> — 詳しくは <a href="linux.md">Linux セットアップ</a></li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>スクリーンショット</h2>
+        <div class="grid shots">
+          <figure>
+            <img src="img/floating.png" alt="フローティングツールバー" />
+            <figcaption>フローティングツールバー</figcaption>
+          </figure>
+          <figure>
+            <img src="img/settings.png" alt="設定" />
+            <figcaption>設定</figcaption>
+          </figure>
+          <figure>
+            <img src="img/devices.png" alt="デバイス" />
+            <figcaption>デバイス</figcaption>
+          </figure>
+          <figure>
+            <img src="img/model.png" alt="モデル" />
+            <figcaption>モデル</figcaption>
+          </figure>
+          <figure>
+            <img src="img/dictionary.png" alt="辞書" />
+            <figcaption>辞書</figcaption>
+          </figure>
+          <figure>
+            <img src="img/logs.png" alt="ログ" />
+            <figcaption>ログ</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="muted small">
+        <p>© HootVoice. MIT ライセンス。</p>
+      </section>
+    </main>
+    <div id="lightbox" hidden></div>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+      lucide.createIcons();
+      const lightbox = document.getElementById('lightbox');
+      document.querySelectorAll('.grid.shots img').forEach(img => {
+        img.addEventListener('click', () => {
+          lightbox.innerHTML = `<img src="${img.src}" alt="${img.alt}">`;
+          lightbox.hidden = false;
+        });
+      });
+      lightbox.addEventListener('click', () => {
+        lightbox.hidden = true;
+      });
+    </script>
+  </body>
+  </html>

@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HootVoice — User Manual</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="lang-switch small"><a href="manual.ja.html">日本語</a></div>
+      <nav class="doc-nav small">
+        <a class="btn" href="index.html"><i data-lucide="home" aria-hidden="true"></i>Home</a>
+        <a class="btn" href="manual.html"><i data-lucide="book" aria-hidden="true"></i>User Manual</a>
+      </nav>
+      <div class="container">
+        <h1>HootVoice — User Manual</h1>
+      </div>
+    </header>
+    <main class="container">
+      <nav class="toc">
+        <h2>Contents</h2>
+        <ol>
+          <li><a href="#basic">Basic Usage</a></li>
+          <li><a href="#local">Local processing (no cloud)</a></li>
+          <li><a href="#quickstart">Quick Start</a></li>
+          <li><a href="#toolbar">Floating Toolbar</a></li>
+          <li><a href="#settings">Settings</a></li>
+          <li><a href="#flow">Recording Flow</a></li>
+          <li><a href="#tips">Tips</a></li>
+          <li><a href="#troubleshooting">Troubleshooting</a></li>
+          <li><a href="#update">Update</a></li>
+          <li><a href="#uninstall">Uninstall</a></li>
+          <li><a href="#advanced">Advanced</a></li>
+        </ol>
+      </nav>
+      <section id="basic">
+        <h2>Basic Usage</h2>
+        <p>Place the cursor in any text field in your OS and press the recording hotkey (Ctrl+Shift+R by default). Speak and stop recording; the speech is transcribed and, if auto‑paste is enabled, inserted into that field.</p>
+        <p>Words that are often misrecognized can be corrected by adding replacements in Settings → Dictionary.</p>
+      </section>
+      <section id="local">
+        <h2>Local processing (no cloud)</h2>
+        <p>HootVoice runs speech recognition entirely on your device. Audio is not sent to external servers.</p>
+        <ul>
+          <li>Privacy: meeting content and sensitive information never leave your machine.</li>
+          <li>Performance: no network latency; speed depends on your CPU/GPU and model size.</li>
+          <li>Cost: no API usage fees — fully free to use.</li>
+          <li>Network note: only the initial Whisper model download uses the network. For offline use, pre‑place the ggml model under your app data <code>models/</code> folder.</li>
+        </ul>
+      </section>
+      <section id="quickstart">
+        <h2>Quick Start</h2>
+        <ul>
+          <li>Windows: run <code>hootvoice.exe</code></li>
+          <li>macOS/Linux: run <code>./hootvoice</code> (works from <code>dist/</code> builds as well)</li>
+        </ul>
+        <p>On first run HootVoice downloads the selected Whisper model to your user config directory (default Large‑v3 ~3.1 GB). You can switch models in Settings → Speech Model.</p>
+        <p>The Whisper models are provided by OpenAI under the MIT License; review the <a href="https://github.com/openai/whisper#license">Whisper license</a> before redistributing models that you download with HootVoice.</p>
+        <p>Default controls:</p>
+        <ul>
+          <li>Toggle recording: Ctrl+Shift+R (configurable in Settings → General)</li>
+          <li>Linux/macOS: send <code>SIGUSR1</code> to toggle, <code>SIGUSR2</code> to open Settings</li>
+        </ul>
+      </section>
+      <section id="toolbar">
+        <h2>Floating Toolbar</h2>
+        <p>A tiny always‑on‑top window shows the current state and a record/stop button. It also has a Settings button and a drag handle to move it.</p>
+        <ul>
+          <li>States: Idle (○), Recording (● red), Processing (● yellow)</li>
+          <li>Wayland: with the <code>wayland_layer</code> feature a sidecar (<code>hootvoice-float</code>) provides layer‑shell floating that behaves like a panel.</li>
+        </ul>
+        <p>Tip: You can switch between Settings and the floating window via the Settings screen.</p>
+      </section>
+      <section id="settings">
+        <h2>Settings</h2>
+        <p>Open the Settings window from the floating toolbar or at launch (default). Tabs:</p>
+        <ul>
+          <li>General
+            <ul>
+              <li>Hotkey for recording, UI language, auto‑paste toggle</li>
+              <li>Show floating toolbar / Open model & dictionary folders</li>
+            </ul>
+          </li>
+          <li>Devices
+            <ul>
+              <li>Select input device/host and output device</li>
+              <li>Input level meter and sensitivity (gain)</li>
+              <li>Quick test recording to verify microphone levels</li>
+            </ul>
+          </li>
+          <li>Speech Model
+            <ul>
+              <li>Choose a preset (Tiny/Base/Small/Medium/Large‑v3) with quality/speed guidance</li>
+              <li>Download/apply the selected model; view the model folder</li>
+            </ul>
+          </li>
+          <li>Dictionary
+            <ul>
+              <li>Define replacements with standard form, aliases and Include conditions</li>
+              <li>Search, add/edit/delete and Apply to activate</li>
+            </ul>
+          </li>
+          <li>Logs
+            <ul>
+              <li>Show recording/processing/copy/paste logs with timestamps</li>
+            </ul>
+          </li>
+        </ul>
+        <p>Changes are saved automatically. Apply model/dictionary changes via the Apply button.</p>
+      </section>
+      <section id="flow">
+        <h2>Recording Flow</h2>
+        <ol>
+          <li>Trigger recording via hotkey or toolbar</li>
+          <li>Speak; elapsed time and input level are shown</li>
+          <li>Stop to run transcription</li>
+          <li>The result is copied to the clipboard and pasted into the front app if enabled</li>
+        </ol>
+        <p>Notes:</p>
+        <ul>
+          <li>On macOS, auto‑paste requires Accessibility + Automation permissions</li>
+          <li>On Linux, auto‑paste requires <code>wtype</code> (Wayland) or <code>xdotool</code> (X11). Without them copy‑only still works.</li>
+        </ul>
+      </section>
+      <section id="tips">
+        <h2>Tips</h2>
+        <ul>
+          <li>Use a smaller model (Tiny/Base/Small) to maximise speed on low‑power systems</li>
+          <li>Linux/Windows: GPU acceleration via Vulkan improves performance greatly; install runtime/driver and <code>glslc</code></li>
+          <li>macOS: Metal/Core ML acceleration is used automatically by whisper‑rs</li>
+        </ul>
+      </section>
+      <section id="troubleshooting">
+        <h2>Troubleshooting</h2>
+        <ul>
+          <li>Auto‑paste blocked on macOS
+            <ul>
+              <li>System Settings → Privacy & Security</li>
+              <li>Accessibility: enable “HootVoice”</li>
+              <li>Automation: allow “HootVoice” → “System Events”</li>
+            </ul>
+          </li>
+          <li>Linux auto‑paste does nothing
+            <ul>
+              <li>Install <code>wtype</code> (Wayland) or <code>xdotool</code> (X11). Otherwise only copy occurs.</li>
+            </ul>
+          </li>
+          <li>Vulkan build/runtime issues on Linux
+            <ul>
+              <li>Install <code>glslc libvulkan-dev vulkan-tools mesa-vulkan-drivers</code> (Ubuntu 24.04) and verify with <code>vulkaninfo</code></li>
+            </ul>
+          </li>
+          <li>No microphone devices
+            <ul>
+              <li>Check <code>aplay -l</code> / <code>arecord -l</code> and your audio server configuration</li>
+            </ul>
+          </li>
+        </ul>
+      </section>
+      <section id="update">
+        <h2>Update</h2>
+        <p>Download the latest release from the official site or distribution page and overwrite the existing application. Settings and models remain in your user data directory, so no reconfiguration is needed. There is currently no automatic updater.</p>
+      </section>
+      <section id="uninstall">
+        <h2>Uninstall</h2>
+        <p>Delete the application and, optionally, remove the user data directory to reclaim model space:</p>
+        <ul>
+          <li>Linux: <code>~/.config/HootVoice</code></li>
+          <li>macOS: <code>~/Library/Application Support/HootVoice</code></li>
+          <li>Windows: <code>%APPDATA%\HootVoice</code></li>
+        </ul>
+      </section>
+      <section id="advanced">
+        <h2>Advanced</h2>
+        <ul>
+          <li>Waybar integration
+            <ul>
+              <li>HootVoice writes status to the OS‑standard config dir (e.g., <code>~/.config/HootVoice/status.json</code>)</li>
+              <li>Create a Waybar custom module that reads this file periodically</li>
+            </ul>
+          </li>
+        </ul>
+        <p>Enjoy faster, hands‑free text input with HootVoice!</p>
+      </section>
+    </main>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>lucide.createIcons();</script>
+  </body>
+</html>
