@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HootVoice — Real‑time voice input</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="lang-switch small"><a href="index.ja.html">日本語</a></div>
+      <nav class="doc-nav small">
+        <a class="btn" href="index.html"><i data-lucide="home" aria-hidden="true"></i>Home</a>
+        <a class="btn" href="manual.html"><i data-lucide="book" aria-hidden="true"></i>User Manual</a>
+        <a class="btn" href="https://github.com/agata/hootvoice"><i data-lucide="github" aria-hidden="true"></i>GitHub</a>
+      </nav>
+      <div class="container">
+        <h1><img src="./img/hootvoice.png" alt="HootVoice logo" class="logo" />HootVoice</h1>
+        <p class="tagline">On-Device Voice Typing. Private by Design</p>
+        <p class="lead">Fast, private voice input powered by Whisper — tiny floating toolbar, device controls, and a user dictionary. Fully local. No cloud.</p>
+        <div class="cta" style="gap: 8px; flex-wrap: wrap;">
+          <a class="btn primary" href="https://github.com/agata/hootvoice/releases/latest/download/HootVoice-windows-x86_64.exe"><i data-lucide="download" aria-hidden="true"></i>Windows (x86_64)</a>
+          <a class="btn primary" href="https://github.com/agata/hootvoice/releases/latest/download/HootVoice-macos-arm64.dmg"><i data-lucide="download" aria-hidden="true"></i>macOS (arm64)</a>
+          <a class="btn primary" href="https://github.com/agata/hootvoice/releases/latest/download/HootVoice-linux-x86_64.AppImage"><i data-lucide="download" aria-hidden="true"></i>Linux AppImage (x86_64)</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+      <section>
+        <h2>Why HootVoice?</h2>
+        <div class="grid features">
+          <div class="feature">
+            <i data-lucide="zap" aria-hidden="true"></i>
+            <h3>Lightning fast</h3>
+            <p>Optimised Whisper transcription keeps up with your thoughts.</p>
+          </div>
+          <div class="feature">
+            <i data-lucide="shield" aria-hidden="true"></i>
+            <h3>Private & local</h3>
+            <p>Everything happens on your machine—no data leaves your device.</p>
+          </div>
+          <div class="feature">
+            <i data-lucide="workflow" aria-hidden="true"></i>
+            <i data-lucide="keyboard" aria-hidden="true"></i>
+            <h3>Effortless workflow</h3>
+            <p>Global hotkeys, auto copy/paste, custom dictionaries, and status sounds with volume control.</p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Get Started</h2>
+        <ul>
+          <li>Read the <a href="manual.html">User Manual</a> for usage tips</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Requirements</h2>
+        <ul>
+          <li>macOS: Apple Silicon Mac running macOS&nbsp;12 or later</li>
+          <li>Windows: 64-bit PC with Windows&nbsp;10 or 11 (latest GPU driver recommended)</li>
+          <li>Linux: Vulkan runtime/driver, <code>glslc</code>, <code>libopenblas</code> — see <a href="linux.md">Linux Setup</a></li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Screenshots</h2>
+        <div class="grid shots">
+          <figure>
+            <img src="img/floating.png" alt="Floating toolbar" />
+            <figcaption>Floating toolbar</figcaption>
+          </figure>
+          <figure>
+            <img src="img/settings.png" alt="Settings" />
+            <figcaption>Settings</figcaption>
+          </figure>
+          <figure>
+            <img src="img/devices.png" alt="Device" />
+            <figcaption>Devices</figcaption>
+          </figure>
+          <figure>
+            <img src="img/model.png" alt="Model" />
+            <figcaption>Model</figcaption>
+          </figure>
+          <figure>
+            <img src="img/dictionary.png" alt="Dictionary" />
+            <figcaption>Dictionary</figcaption>
+          </figure>
+          <figure>
+            <img src="img/logs.png" alt="Logs" />
+            <figcaption>Logs</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="muted small">
+        <p>© HootVoice. MIT License.</p>
+      </section>
+    </main>
+    <div id="lightbox" hidden></div>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+      lucide.createIcons();
+      const lightbox = document.getElementById('lightbox');
+      document.querySelectorAll('.grid.shots img').forEach(img => {
+        img.addEventListener('click', () => {
+          lightbox.innerHTML = `<img src="${img.src}" alt="${img.alt}">`;
+          lightbox.hidden = false;
+        });
+      });
+      lightbox.addEventListener('click', () => {
+        lightbox.hidden = true;
+      });
+    </script>
+  </body>
+  </html>

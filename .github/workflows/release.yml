@@ -1,0 +1,258 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-release:
+    name: Release build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_CACHE_SIZE: 3G
+      # Evaluate matrix.os at job creation time (runner is not defined)
+      # Use clang+lld only on Linux (deps installed below)
+      RUSTFLAGS: ${{ startsWith(matrix.os, 'ubuntu-') && '-C linker=clang -C link-arg=-fuse-ld=lld' || '' }}
+      # macOS signing / notarization (empty on non-macOS)
+      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+      MACOS_TEAM_ID: ${{ secrets.MACOS_TEAM_ID }}
+      MACOS_NOTARIZE_APPLE_ID: ${{ secrets.MACOS_NOTARIZE_APPLE_ID }}
+      MACOS_NOTARIZE_PWD: ${{ secrets.MACOS_NOTARIZE_PWD }}
+      # Windows code signing (map secrets to env for use in if:)
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Enable sccache
+        uses: mozilla-actions/sccache-action@v0.0.6
+
+      - name: Cache cargo target/registry
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'pull_request' }}
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Setup platform
+        uses: ./.github/actions/setup-platform
+
+      - name: Install cargo-bundle (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "[setup] Installing cargo-bundle for macOS app bundling..."
+          cargo install cargo-bundle --locked || true
+
+      - name: Import macOS signing certificate
+        if: runner.os == 'macOS' && env.MACOS_SIGN_IDENTITY != ''
+        shell: bash
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          echo "[codesign] Importing Developer ID certificate into a temporary keychain..."
+          KEYCHAIN="$RUNNER_TEMP/build.keychain"
+          KEYCHAIN_PWD="actions-temp"
+          if base64 --help 2>&1 | grep -q -- '--decode'; then
+            echo "$MACOS_CERT_P12_BASE64" | base64 --decode > cert.p12
+          else
+            echo "$MACOS_CERT_P12_BASE64" | base64 -D > cert.p12
+          fi
+          security create-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
+          security import cert.p12 -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -A
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain
+          security default-keychain -s "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PWD" "$KEYCHAIN"
+          rm -f cert.p12
+
+      - name: Build release artifacts (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          chmod +x ./build.sh
+          ./build.sh
+
+      - name: Build release artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Write-Host "🔨 Starting HootVoice release build..."
+
+          # Normalize arch name for file suffix
+          $archEnv = $env:PROCESSOR_ARCHITECTURE
+          switch ($archEnv.ToUpper()) {
+            'AMD64' { $arch = 'x86_64' }
+            'ARM64' { $arch = 'arm64' }
+            Default { $arch = $archEnv.ToLower() }
+          }
+          $outExe = "HootVoice-windows-$arch.exe"
+          Write-Host "📦 Platform: windows-$arch"
+
+          Write-Host "🚀 Building release..."
+          cargo build --release
+
+          # Resolve target dir (CARGO_TARGET_DIR may be set to R:\ by setup step)
+          $targetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { 'target' }
+          $targetDir = $targetDir -replace '/', '\\'
+
+          # Prepare dist
+          New-Item -ItemType Directory -Force -Path 'dist' | Out-Null
+
+          # Copy binary and rename with OS+arch suffix
+          $exe = Join-Path $targetDir 'release\hootvoice.exe'
+          Write-Host "📄 Copying binary from: $exe"
+          Copy-Item $exe (Join-Path 'dist' $outExe) -Force
+
+          # Copy resources (optional)
+          if (Test-Path 'sounds') { Copy-Item 'sounds' 'dist\' -Recurse -Force }
+          if (Test-Path 'USER_MANUAL.md') { Copy-Item 'USER_MANUAL.md' 'dist\' -Force }
+          if (Test-Path 'USER_MANUAL.ja.md') { Copy-Item 'USER_MANUAL.ja.md' 'dist\' -Force }
+
+          # Do not create a ZIP; we distribute the signed exe directly
+          Write-Host "✅ Windows build ready: dist/$outExe"
+          Get-ChildItem 'dist' | Format-Table -AutoSize
+
+          # Export path for signing step
+          "WIN_EXE=dist\\$outExe" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build AppImage (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          bash ./scripts/make_appimage.sh || true
+
+      - name: Build macOS app + DMG (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          bash ./scripts/make_macos_app.sh || true
+          bash ./scripts/make_macos_dmg.sh || true
+
+      - name: Codesign DMG (macOS)
+        if: runner.os == 'macOS' && env.MACOS_SIGN_IDENTITY != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          DMG=$(ls dist/HootVoice-macos-*.dmg 2>/dev/null | head -n 1 || true)
+          if [[ -n "${DMG:-}" && -f "$DMG" ]]; then
+            echo "[codesign] Signing DMG: $DMG"
+            codesign --force --timestamp -s "$MACOS_SIGN_IDENTITY" "$DMG" || true
+          else
+            echo "[codesign] DMG not found; skipping"
+          fi
+
+      - name: Code sign Windows exe via Azure Trusted Signing
+        if: runner.os == 'Windows' && env.AZURE_TENANT_ID != '' && env.AZURE_CLIENT_ID != '' && env.AZURE_CLIENT_SECRET != ''
+        uses: azure/trusted-signing-action@v0.5.9
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.TS_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.TS_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ secrets.TS_CERT_PROFILE }}
+          files: ${{ github.workspace }}\${{ env.WIN_EXE }}
+
+      # No Windows ZIP repack (distribute signed exe directly)
+
+      - name: Notarize DMG (macOS)
+        if: runner.os == 'macOS' && env.MACOS_NOTARIZE_APPLE_ID != '' && env.MACOS_TEAM_ID != '' && env.MACOS_NOTARIZE_PWD != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          DMG=$(ls dist/HootVoice-macos-*.dmg 2>/dev/null | head -n 1 || true)
+          if [[ -n "${DMG:-}" && -f "$DMG" ]]; then
+            echo "[notary] Submitting DMG for notarization: $DMG"
+            xcrun notarytool submit "$DMG" \
+              --apple-id "$MACOS_NOTARIZE_APPLE_ID" \
+              --team-id "$MACOS_TEAM_ID" \
+              --password "$MACOS_NOTARIZE_PWD" \
+              --wait || echo "[notary] Notarization failed or skipped"
+            xcrun stapler staple "$DMG" || true
+          else
+            echo "[notary] DMG not found; skipping"
+          fi
+
+      - name: Collect artifacts (exe/dmg/AppImage only)
+        shell: bash
+        run: |
+          mkdir -p upload
+          # Collect platform deliverables only
+          find dist -maxdepth 1 -type f \( -name "*.AppImage" -o -name "*.dmg" -o -name "*.exe" \) \
+            -exec cp {} upload/ \; 2>/dev/null
+          ls -la upload || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hootvoice-${{ matrix.os }}-${{ github.ref_name }}
+          path: upload
+
+  create-release:
+    needs: build-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: collected
+
+      - name: Extract release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          ver="${GITHUB_REF_NAME}"
+          awk -v ver="$ver" '$1=="##" && $2==ver {p=1;next} $1=="##" && p {exit} p' CHANGELOG.md > RELEASE_NOTES.md
+          echo "[release] Notes for $ver:" || true
+          cat RELEASE_NOTES.md || true
+
+      - name: Prepare release assets (exe/dmg/AppImage)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "[release] Preparing release assets (exe/dmg/AppImage only)..."
+          mkdir -p release-assets
+
+          find collected -type f \( -name "*.AppImage" -o -name "*.dmg" -o -name "*.exe" \) | sort -u | while read -r f; do
+            base=$(basename "$f")
+            cp -f "$f" "release-assets/$base"
+            echo "[release] Added artifact: $base"
+          done
+
+          ls -la release-assets || true
+
+      - name: Create GitHub Release
+        continue-on-error: true
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          files: release-assets/*
+          body_path: RELEASE_NOTES.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

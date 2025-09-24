@@ -1,0 +1,95 @@
+name: Setup platform prerequisites
+description: OS-specific setup without changing current behavior
+runs:
+  using: composite
+  steps:
+    - name: Install Linux deps (Audio/Vulkan/OpenBLAS)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update -y
+        sudo apt-get install -y --no-install-recommends \
+          build-essential pkg-config clang lld \
+          libasound2-dev \
+          libgtk-4-dev libglib2.0-dev \
+          libvulkan-dev vulkan-tools mesa-vulkan-drivers \
+          libopenblas-dev || true
+        # Install only one: glslc (24.04) or glslang-tools (22.04)
+        sudo apt-get install -y --no-install-recommends glslc \
+          || sudo apt-get install -y --no-install-recommends glslang-tools || true
+        # Export BLAS include dir for whisper-rs-sys when openblas is enabled
+        MA=$(gcc -print-multiarch || echo x86_64-linux-gnu)
+        echo "BLAS_INCLUDE_DIRS=/usr/include/${MA}" >> "$GITHUB_ENV"
+
+    - name: Configure macOS CMake flags (disable MATMUL_INT8)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        echo 'CMAKE_C_FLAGS=-U__ARM_FEATURE_MATMUL_INT8' >> "$GITHUB_ENV"
+        echo 'CMAKE_CXX_FLAGS=-U__ARM_FEATURE_MATMUL_INT8' >> "$GITHUB_ENV"
+
+    - name: Shorten build paths (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        New-Item -ItemType Directory -Force -Path 'D:\t' | Out-Null
+        if ((subst) -match 'R:') { subst R: /D }
+        subst R: D:\t
+        'CARGO_TARGET_DIR=R:\' | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+        New-Item -ItemType Directory -Force -Path 'R:\s' | Out-Null
+        'SCCACHE_DIR=R:\s' | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+    - name: Install Vulkan SDK (Windows)
+      if: runner.os == 'Windows'
+      uses: humbletim/install-vulkan-sdk@v1.2
+      with:
+        version: 1.4.309.0
+        cache: true
+
+    - name: Export Vulkan env (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        if (Test-Path 'C:\VulkanSDK') {
+          $sdk = Get-ChildItem 'C:\VulkanSDK' -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          if ($sdk) {
+            "VULKAN_SDK=$($sdk.FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            "$($sdk.FullName)\Bin" | Out-File $env:GITHUB_PATH -Append -Encoding utf8
+          }
+        }
+        "Vulkan_INCLUDE_DIR=$env:VULKAN_SDK\Include"    | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+        "Vulkan_LIBRARY=$env:VULKAN_SDK\Lib\vulkan-1.lib" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+        where glslc
+        glslc --version
+
+    - name: Setup MSVC environment (Windows)
+      if: runner.os == 'Windows'
+      uses: ilammy/msvc-dev-cmd@v1
+
+    - name: Setup Ninja (Windows)
+      if: runner.os == 'Windows'
+      uses: seanmiddleditch/gha-setup-ninja@v3
+
+    - name: Build flags & speed knobs (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+
+        # Release optimizations via Cargo profile (not RUSTFLAGS)
+        "CARGO_PROFILE_RELEASE_LTO=thin"        | Out-File $env:GITHUB_ENV -Append
+        "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=8" | Out-File $env:GITHUB_ENV -Append
+
+        # Use Ninja; conservative parallelism (set 1 if needed)
+        "CMAKE_GENERATOR=Ninja"                 | Out-File $env:GITHUB_ENV -Append
+        "CMAKE_BUILD_PARALLEL_LEVEL=$env:NUMBER_OF_PROCESSORS" | Out-File $env:GITHUB_ENV -Append
+
+        # PDB conflict mitigation: /Zi -> /Z7 (Embedded)
+        "CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded" | Out-File $env:GITHUB_ENV -Append
+        "CMAKE_C_FLAGS_RELWITHDEBINFO=/Z7"             | Out-File $env:GITHUB_ENV -Append
+        "CMAKE_CXX_FLAGS_RELWITHDEBINFO=/Z7"           | Out-File $env:GITHUB_ENV -Append
+
+        # OpenMP OFF (matches whisper-rs default)
+        "GGML_OPENMP=OFF"                        | Out-File $env:GITHUB_ENV -Append
