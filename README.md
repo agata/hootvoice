@@ -29,9 +29,19 @@ HootVoice runs entirely on your device. Audio is not uploaded to any server.
 - Performance: no network latency; speed depends on CPU/GPU and chosen model.
 - Cost: no API usage fees. Only the first-time model download needs network; you can pre-seed `models/` for offline use.
 
-### Whisper model licensing
+## Screenshots
 
-HootVoice downloads Whisper models on demand. Whisper (and the ggml conversions it uses) are released under the MIT License by OpenAI. See the [Whisper repository](https://github.com/openai/whisper#license) for full terms before redistributing models with your own builds.
+<p align="center">
+  <a href="docs/img/logs.png"><img src="docs/img/logs.png" width="260" alt="Transcription log" /></a>
+  <a href="docs/img/settings.png"><img src="docs/img/settings.png" width="260" alt="Settings overview" /></a>
+  <a href="docs/img/devices.png"><img src="docs/img/devices.png" width="260" alt="Audio devices" /></a>
+</p>
+
+<p align="center">
+  <a href="docs/img/dictionary.png"><img src="docs/img/dictionary.png" width="260" alt="User dictionary" /></a>
+  <a href="docs/img/model.png"><img src="docs/img/model.png" width="260" alt="Model selection" /></a>
+  <a href="docs/img/floating.png"><img src="docs/img/floating.png" width="260" alt="Floating window" /></a>
+</p>
 
 ## Requirements
 
@@ -166,15 +176,19 @@ Notes:
 - Auto‑paste on Linux: install `wtype` on Wayland or `xdotool` on X11. If not available, the app falls back to copy‑only.
 - No microphone devices: check ALSA devices (`aplay -l`, `arecord -l`) and audio server.
 
-## Third‑party licenses
-
-The app bundles `assets/THIRD_PARTY_LICENSES.md` generated via `cargo-about` for in‑app viewing (Settings → General).
-
 ## License
 
 MIT
 
 Runtime Whisper models downloaded through HootVoice are provided by OpenAI under the MIT License; review the upstream [Whisper license](https://github.com/openai/whisper#license) before redistributing bundled models.
+
+## Third‑party licenses
+
+The app bundles `assets/THIRD_PARTY_LICENSES.md` generated via `cargo-about` for in‑app viewing (Settings → General).
+
+## Whisper model licensing
+
+HootVoice downloads Whisper models on demand. Whisper (and the ggml conversions it uses) are released under the MIT License by OpenAI. See the [Whisper repository](https://github.com/openai/whisper#license) for full terms before redistributing models with your own builds.
 
 ## Contributing
 

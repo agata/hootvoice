@@ -16,6 +16,20 @@ HootVoice はマイク音声を録音し、Whisper でリアルタイムに文�
 - 効果音（開始／処理中／完了、音量調整可能）
  - 完全ローカル: 端末内で完結（クラウド不要・API費用なし）
 
+## スクリーンショット
+
+<p align="center">
+  <a href="docs/img/logs.png"><img src="docs/img/logs.png" width="260" alt="Transcription log" /></a>
+  <a href="docs/img/settings.png"><img src="docs/img/settings.png" width="260" alt="Settings overview" /></a>
+  <a href="docs/img/devices.png"><img src="docs/img/devices.png" width="260" alt="Audio devices" /></a>
+</p>
+
+<p align="center">
+  <a href="docs/img/dictionary.png"><img src="docs/img/dictionary.png" width="260" alt="User dictionary" /></a>
+  <a href="docs/img/model.png"><img src="docs/img/model.png" width="260" alt="Model selection" /></a>
+  <a href="docs/img/floating.png"><img src="docs/img/floating.png" width="260" alt="Floating window" /></a>
+</p>
+
 ## 要件
 
 - Rust 1.70+、C/C++ ビルド環境
@@ -63,10 +77,6 @@ HootVoice は音声認識を端末上（ローカル）で実行します。音�
 - 速度: ネットワーク遅延の影響を受けず、CPU/GPU とモデルサイズに応じて高速に動作。
 - コスト: API の従量課金は不要（無料）。
 - ネットワーク利用: 初回のモデルダウンロード時のみ通信します。オフライン利用は、事前に `models/` に ggml モデルを配置してください。
-
-### Whisper モデルのライセンス
-
-HootVoice は利用時に Whisper の ggml モデルをダウンロードします。Whisper（および利用している ggml 変換版）は OpenAI によって MIT License で提供されています。再配布を行う場合などは、[Whisper リポジトリ](https://github.com/openai/whisper#license) に記載された条件をご確認ください。
 
 ## 実行
 
@@ -155,15 +165,17 @@ Waybar のスタイル例（`~/.config/waybar/style.css`）:
 - 自動ペースト（Linux）: Wayland は `wtype`、X11 は `xdotool` を導入。未導入時はコピーのみになります。
 - マイクが見えない: `aplay -l` / `arecord -l` で確認。オーディオサーバの稼働を確認。
 
-## サードパーティライセンス
-
-アプリには `assets/THIRD_PARTY_LICENSES.md`（`cargo-about` で生成）が同梱され、設定画面から参照できます。
-
 ## ライセンス
 
 MIT
 
-HootVoice がダウンロードする Whisper モデル（ggml 版を含む）は OpenAI による MIT License の提供物です。モデルを再配布する際は、[Whisper リポジトリのライセンス](https://github.com/openai/whisper#license) を必ず確認してください。
+## サードパーティライセンス
+
+アプリには `assets/THIRD_PARTY_LICENSES.md`（`cargo-about` で生成）が同梱され、設定画面から参照できます。
+
+## Whisper モデルのライセンス
+
+HootVoice は利用時に Whisper の ggml モデルをダウンロードします。Whisper（および利用している ggml 変換版）は OpenAI によって MIT License で提供されています。再配布を行う場合などは、[Whisper リポジトリ](https://github.com/openai/whisper#license) に記載された条件をご確認ください。
 
 ## 貢献
 
