@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HootVoice — LLM Post-processing Guide</title>
+    <meta name="description" content="Step-by-step guide to enable HootVoice LLM post-processing. Learn how to set up Ollama or LM Studio and which local models work best." />
+    <meta name="theme-color" content="#3b53ff" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="lang-switch small"><a href="https://hootvoice.com/llm-postprocess.ja.html">日本語</a></div>
+      <nav class="doc-nav small">
+        <a class="btn" href="https://hootvoice.com/index.html"><i data-lucide="home" aria-hidden="true"></i>Home</a>
+        <a class="btn" href="https://hootvoice.com/manual.html#llm-postprocess"><i data-lucide="book" aria-hidden="true"></i>User Manual</a>
+      </nav>
+      <div class="container">
+        <h1>LLM Post-processing Guide</h1>
+        <p class="lead">Configure Ollama or LM Studio so HootVoice can clean up, summarize, and rephrase Whisper transcripts using a local LLM.</p>
+      </div>
+    </header>
+    <main class="container">
+      <nav class="toc">
+        <h2>Contents</h2>
+        <ol>
+          <li><a href="#overview">Overview</a></li>
+          <li><a href="#flow">How it Works</a></li>
+          <li><a href="#checklist">Setup Checklist</a></li>
+          <li><a href="#ollama">Using Ollama</a></li>
+          <li><a href="#lmstudio">Using LM Studio</a></li>
+          <li><a href="#models">Recommended Models</a></li>
+          <li><a href="#resources">Local Resource Requirements</a></li>
+          <li><a href="#troubleshooting">Troubleshooting</a></li>
+        </ol>
+      </nav>
+
+      <section id="overview">
+        <h2>Overview</h2>
+        <p>When LLM post-processing is enabled, HootVoice sends each Whisper transcript to a local LLM endpoint so the text can be polished, made polite, or summarised automatically. The feature expects an OpenAI-compatible API such as Ollama or LM Studio.</p>
+        <p>The toggle is disabled by default. Open <strong>Settings → LLM</strong> and enable <strong>Enable LLM post-processing</strong>, then configure the API base URL and model name to match your local server. In that tab we recommend starting with <code>gemma-3-12b-it</code> quantised to <code>Q4_K_M</code> for proofreading-focused workflows.</p>
+      </section>
+
+      <section id="flow">
+        <h2>How it Works</h2>
+        <ol>
+          <li>HootVoice transcribes your recording locally with Whisper.</li>
+          <li>Once transcription finishes, it calls <code>/v1/chat/completions</code> on the configured LLM endpoint.</li>
+          <li>The LLM response replaces the raw transcript in the log and clipboard.</li>
+          <li>If auto-paste is enabled, the processed text is inserted into the frontmost app.</li>
+        </ol>
+        <p>If the API fails or times out, HootVoice falls back to the original Whisper text. Logs capture HTTP status codes and any error payloads for quick diagnostics.</p>
+      </section>
+
+      <section id="checklist">
+        <h2>Setup Checklist</h2>
+        <ul>
+          <li>An OpenAI-compatible server (Ollama or LM Studio) is running on your machine</li>
+          <li>The target LLM model is downloaded and ready to serve</li>
+          <li><code>curl</code> requests to <code>/v1/models</code> or <code>/v1/chat/completions</code> succeed</li>
+          <li>HootVoice settings reference the correct API base URL and model identifier</li>
+        </ul>
+      </section>
+
+      <section id="ollama">
+        <h2>Using Ollama</h2>
+        <p>Ollama exposes an OpenAI-compatible REST API at <code>http://localhost:11434/v1</code>, which matches the default value in HootVoice.</p>
+        <h3 id="ollama-macos">macOS</h3>
+        <ol>
+          <li>Install via <code>brew install ollama</code> (requires Homebrew).</li>
+          <li>Run <code>ollama run llama3.1:8b</code> to download and cache the model.</li>
+          <li>Keep the background service running with <code>ollama serve</code> or the Ollama menu bar app.</li>
+        </ol>
+        <h3 id="ollama-windows">Windows</h3>
+        <ol>
+          <li>Download the installer from <a href="https://ollama.com/download/windows">ollama.com</a> and complete setup.</li>
+          <li>Open PowerShell and run <code>ollama run llama3.1:8b</code> to fetch the model.</li>
+          <li>The service stays active in the background; manage it from the system tray.</li>
+        </ol>
+        <h3 id="ollama-linux">Linux</h3>
+        <ol>
+          <li>Run <code>curl https://ollama.ai/install.sh | sh</code>.</li>
+          <li>Enable the user service with <code>systemctl --user enable --now ollama</code>.</li>
+          <li>Download a model via <code>ollama run llama3.1:8b</code> and verify the API responds.</li>
+        </ol>
+        <p>Test connectivity with:</p>
+        <pre><code class="language-bash">curl http://localhost:11434/v1/models</code></pre>
+      </section>
+
+      <section id="lmstudio">
+        <h2>Using LM Studio</h2>
+        <p>LM Studio offers a GUI for managing models and ships with an OpenAI-compatible server. The default port is <code>1234</code>, so set HootVoice’s base URL to <code>http://localhost:1234/v1</code>.</p>
+        <h3 id="lmstudio-macos">macOS</h3>
+        <ol>
+          <li>Download the DMG from the <a href="https://lmstudio.ai/">LM Studio website</a> and install it.</li>
+          <li>Open “Download Models” and grab the models you want.</li>
+          <li>Click “Start Server” and enable the “OpenAI Compatible Server” option.</li>
+        </ol>
+        <h3 id="lmstudio-windows">Windows</h3>
+        <ol>
+          <li>Run the Windows installer with the default options.</li>
+          <li>Download models from within the app, then switch to the “Server” tab.</li>
+          <li>Press “Start Server” and enable auto-start if you need it on boot.</li>
+        </ol>
+        <h3 id="lmstudio-linux">Linux</h3>
+        <ol>
+          <li>Launch the AppImage or install the Debian package.</li>
+          <li>Download a model, then toggle the server switch in the top-right corner.</li>
+          <li>Allow inbound traffic on port 1234 if your firewall prompts.</li>
+        </ol>
+        <p>Confirm the server is reachable:</p>
+        <pre><code class="language-bash">curl http://localhost:1234/v1/models</code></pre>
+      </section>
+
+      <section id="models">
+        <h2>Recommended Models</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Use case</th>
+              <th>Model</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Japanese polishing & polite tone</td>
+              <td><code>llama3.1:8b</code> (Ollama), <code>Meta-Llama-3-8B-Instruct</code> (LM Studio)</td>
+              <td>Multilingual, runs on ~8&nbsp;GB RAM/VRAM.</td>
+            </tr>
+            <tr>
+              <td>English summaries</td>
+              <td><code>qwen2.5:7b-instruct</code>, <code>Phi-3.5-mini-instruct</code></td>
+              <td>Fast responses with concise outputs; ideal for meeting notes.</td>
+            </tr>
+            <tr>
+              <td>Maximum accuracy</td>
+              <td><code>llama3.1:70b</code> or other large instruction-tuned models</td>
+              <td>Requires high-end GPU/VRAM; tune <code>OLLAMA_NUM_PARALLEL</code> as needed.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>Make sure the model identifier matches your runtime. Ollama lists models via <code>ollama list</code>, while LM Studio shows the identifier in the “Local Models” panel.</p>
+      </section>
+
+      <section id="resources">
+        <h2>Local Resource Requirements</h2>
+        <p>Running Gemma-3-12B locally in 4-bit/QAT mode for proofreading tasks generally requires the following resources:</p>
+        <ul>
+          <li><strong>CPU / OS:</strong> Supports macOS 13.4+ (Apple Silicon M1/M2/M3/M4), Windows 10+/11 (x64/ARM), and Ubuntu 20.04+. LM Studio runs best with 16&nbsp;GB or more RAM; larger models consume additional memory.</li>
+          <li><strong>GPU / Memory:</strong>
+            <ul>
+              <li>Target at least 11&nbsp;GB of GPU VRAM. Google’s guidance for 12B models: 4-bit ≈ 8.7&nbsp;GB, 8-bit ≈ 12.2&nbsp;GB, BF16 ≈ 20&nbsp;GB. These figures only cover model loading; KV cache usage scales with context length.</li>
+              <li>Platform-specific minimums:
+                <ul>
+                  <li>macOS (Apple Silicon): unified memory of 16&nbsp;GB or more, with roughly 75% of total RAM available to the GPU.</li>
+                  <li>Windows / Linux (NVIDIA): RTX 3060 12&nbsp;GB or better.</li>
+                  <li>Windows / Linux (AMD): Radeon RX 6700 XT 12&nbsp;GB or better.</li>
+                  <li>Windows / Linux (Intel Arc): Arc A770 16&nbsp;GB.</li>
+                </ul>
+              </li>
+            </ul>
+          </li>
+          <li><strong>Recommended quantisation &amp; settings:</strong>
+            <ul>
+              <li>Start with Q4 variants (e.g. <code>Q4_K_M</code>). Move to Q5 or Q6 if you have spare headroom.</li>
+              <li>Use an initial context window of 8k–16k tokens; longer inputs demand additional VRAM for the KV cache.</li>
+              <li>Disable image input for proofreading scenarios. Gemma 3 treats each image as roughly 256 tokens, reducing usable context.</li>
+            </ul>
+          </li>
+        </ul>
+      </section>
+
+      <section id="troubleshooting">
+        <h2>Troubleshooting</h2>
+        <ul>
+          <li><strong>HTTP 404</strong>: Ensure the base URL includes <code>/v1</code>.</li>
+          <li><strong>Timeouts</strong>: Initial model load may take 30+ seconds; try a smaller model first.</li>
+          <li><strong>Wrong language</strong>: Set “Prompt language override” to Japanese or include language instructions in your prompt.</li>
+          <li><strong>High resource usage</strong>: Use quantised models (e.g. <code>-q4_K_M</code> variants) or lower the number of GPU layers.</li>
+        </ul>
+        <p>If issues persist, copy the log entry with the failing request/response and share it with the HootVoice team.</p>
+      </section>
+    </main>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+      lucide.createIcons();
+    </script>
+  </body>
+</html>

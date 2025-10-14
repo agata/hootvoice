@@ -15,6 +15,7 @@ mod dictionary;
 mod gui;
 mod hotkey;
 mod i18n;
+mod llm;
 mod transcription;
 mod utils;
 // removed updater module (unused)

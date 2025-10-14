@@ -26,6 +26,7 @@
           <li><a href="#quickstart">Quick Start</a></li>
           <li><a href="#toolbar">Floating Toolbar</a></li>
           <li><a href="#settings">Settings</a></li>
+          <li><a href="#llm-postprocess">LLM Post-processing</a></li>
           <li><a href="#flow">Recording Flow</a></li>
           <li><a href="#tips">Tips</a></li>
           <li><a href="#troubleshooting">Troubleshooting</a></li>
@@ -108,6 +109,16 @@
           </li>
         </ul>
         <p>Changes are saved automatically. Apply model/dictionary changes via the Apply button.</p>
+      </section>
+      <section id="llm-postprocess">
+        <h2>LLM Post-processing</h2>
+        <p>Open the <strong>LLM</strong> tab in Settings and enable <strong>Enable LLM post-processing</strong> to send Whisper transcripts to a local LLM that can clean up punctuation, switch tone, or generate summaries.</p>
+        <ul>
+          <li>Set the API base URL and model name to match your OpenAI-compatible server (Ollama, LM Studio, etc.).</li>
+          <li>Select one of the presets (format/summary) or define a custom prompt to tailor the output.</li>
+          <li>If the request fails, HootVoice falls back to the raw Whisper transcript and logs the error.</li>
+        </ul>
+        <p>See the <a href="https://hootvoice.com/llm-postprocess.html">LLM post-processing setup guide</a> for full platform instructions and recommended models.</p>
       </section>
       <section id="flow">
         <h2>Recording Flow</h2>

@@ -13,6 +13,7 @@ use crate::audio::VadStrategy;
 use crate::core::{SimpleRecState, WhisperCore};
 use crate::hotkey::HotkeyManager;
 use crate::i18n;
+use crate::llm::LlmPostProcessSettings;
 use crate::utils::app_config_dir;
 use egui::FontFamily;
 use lucide_icons::Icon;
@@ -29,6 +30,8 @@ enum TabView {
     Devices,
     SpeechModel,
     Dictionary,
+    Llm,
+    History,
     Logs,
 }
 
@@ -51,6 +54,7 @@ pub struct WhisperApp {
     main_minimized_by_app: bool,
     // Keep global hotkey manager alive for app lifetime
     hotkey_manager: Option<HotkeyManager>,
+    llm_was_enabled: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -71,6 +75,7 @@ struct LiveSettingsSnapshot {
     max_record_secs: f32,
     sound_enabled: bool,
     sound_volume_percent: f32,
+    llm_postprocess: LlmPostProcessSettings,
 }
 
 // File I/O helpers moved to utils::logfile
@@ -98,6 +103,7 @@ impl WhisperApp {
             max_record_secs: s0.max_record_secs,
             sound_enabled: s0.sound_enabled,
             sound_volume_percent: s0.sound_volume_percent,
+            llm_postprocess: s0.llm_postprocess.clone(),
         }));
         crate::utils::sound::set_enabled(s0.sound_enabled);
         crate::utils::sound::set_volume_percent(s0.sound_volume_percent);
@@ -128,6 +134,7 @@ impl WhisperApp {
         if !settings_window.dict_entries.is_empty() {
             core.set_dictionary_entries(settings_window.dict_entries.clone());
         }
+        core.set_llm_postprocess_settings(s0.llm_postprocess.clone());
         // Settings UI log integration not required
 
         let settings_requested = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -155,6 +162,7 @@ impl WhisperApp {
             main_hidden_by_app: false,
             main_minimized_by_app: false,
             hotkey_manager: None,
+            llm_was_enabled: s0.llm_postprocess.enabled,
         };
 
         // removed: system tray
@@ -223,6 +231,7 @@ impl WhisperApp {
                             core_for_hotkey.set_chunk_split_strategy(s.chunk_split_strategy);
                             core_for_hotkey
                                 .set_auto_stop_params(s.auto_stop_silence_secs, s.max_record_secs);
+                            core_for_hotkey.set_llm_postprocess_settings(s.llm_postprocess.clone());
                         }
                         core_for_hotkey.toggle_recording();
                     }) {
@@ -241,7 +250,6 @@ impl WhisperApp {
                 }
             }
         }
-
         // SIGUSR1/SIGUSR2 signal handling (Linux/macOS only)
         #[cfg(unix)]
         {
@@ -290,6 +298,7 @@ impl WhisperApp {
                             core_for_signal.set_chunk_split_strategy(s.chunk_split_strategy);
                             core_for_signal
                                 .set_auto_stop_params(s.auto_stop_silence_secs, s.max_record_secs);
+                            core_for_signal.set_llm_postprocess_settings(s.llm_postprocess.clone());
                         }
                         core_for_signal.toggle_recording();
                     } else if sig == SIGUSR2 {
@@ -338,6 +347,8 @@ impl WhisperApp {
         // 自動停止
         self.core
             .set_auto_stop_params(s.auto_stop_silence_secs, s.max_record_secs);
+        self.core
+            .set_llm_postprocess_settings(s.llm_postprocess.clone());
     }
 
     pub fn show_floating_window(&mut self) {
@@ -408,6 +419,7 @@ impl eframe::App for WhisperApp {
         // Each frame, reflect latest UI settings to a snapshot
         {
             let s = self.settings_window.get_settings();
+            let llm_enabled_now = s.llm_postprocess.enabled;
             if let Ok(mut snap) = self.live_settings.lock() {
                 snap.whisper_language = s.whisper_language.clone();
                 snap.input_device = s.input_device.clone();
@@ -425,7 +437,12 @@ impl eframe::App for WhisperApp {
                 snap.max_record_secs = s.max_record_secs;
                 snap.sound_enabled = s.sound_enabled;
                 snap.sound_volume_percent = s.sound_volume_percent;
+                snap.llm_postprocess = s.llm_postprocess.clone();
             }
+            if llm_enabled_now && !self.llm_was_enabled {
+                self.add_log("LLM post-processing enabled.");
+            }
+            self.llm_was_enabled = llm_enabled_now;
         }
         // system tray removed
 
@@ -445,7 +462,10 @@ impl eframe::App for WhisperApp {
                 // 待機中は10秒ごとに更新
                 ctx.request_repaint_after(std::time::Duration::from_secs(10));
             }
-            SimpleRecState::Recording | SimpleRecState::Processing | SimpleRecState::Busy => {
+            SimpleRecState::Recording
+            | SimpleRecState::Processing
+            | SimpleRecState::PostProcessing
+            | SimpleRecState::Busy => {
                 // アクティブな処理中は1秒ごとに更新
                 ctx.request_repaint_after(std::time::Duration::from_secs(1));
             }
@@ -502,6 +522,15 @@ impl eframe::App for WhisperApp {
                                     Icon::Loader.unicode(),
                                 )
                             }
+                            SimpleRecState::PostProcessing => {
+                                ctx.request_repaint_after(std::time::Duration::from_millis(500));
+                                (
+                                    i18n::tr("status-post-processing"),
+                                    egui::Color32::from_rgb(75, 154, 242),
+                                    egui::Color32::WHITE,
+                                    Icon::Loader.unicode(),
+                                )
+                            }
                             SimpleRecState::Busy => {
                                 ctx.request_repaint_after(std::time::Duration::from_millis(500));
                                 (
@@ -555,6 +584,12 @@ impl eframe::App for WhisperApp {
                                 SimpleRecState::Processing => {
                                     self.add_log("[Record] Stopped recording; started processing");
                                     i18n::tr("msg-processing")
+                                }
+                                SimpleRecState::PostProcessing => {
+                                    self.add_log(
+                                        "[Record] Stopped recording; running post-processing",
+                                    );
+                                    i18n::tr("status-post-processing")
                                 }
                                 SimpleRecState::Idle => {
                                     self.add_log("[Record] Recording stopped");
@@ -633,6 +668,16 @@ impl eframe::App for WhisperApp {
                         }
                         ui.add_space(6.0);
                         {
+                            let label = i18n::tr("tab-llm");
+                            add_tab(Icon::Wand, &label, TabView::Llm, ui);
+                        }
+                        ui.add_space(6.0);
+                        {
+                            let label = i18n::tr("tab-history");
+                            add_tab(Icon::Clock, &label, TabView::History, ui);
+                        }
+                        ui.add_space(6.0);
+                        {
                             let label = i18n::tr("tab-logs");
                             add_tab(Icon::FileText, &label, TabView::Logs, ui);
                         }
@@ -675,6 +720,12 @@ impl eframe::App for WhisperApp {
                                 }
                                 TabView::Dictionary => {
                                     self.settings_window.ui_dictionary_section(ui);
+                                }
+                                TabView::Llm => {
+                                    self.settings_window.ui_section_llm(ui);
+                                }
+                                TabView::History => {
+                                    self.settings_window.ui_section_history(ui);
                                 }
                                 TabView::Logs => {
                                     // ログビュー
@@ -731,7 +782,9 @@ impl eframe::App for WhisperApp {
                                                         egui::Color32::from_rgb(100, 200, 255)
                                                     } else if log.contains("[Process]") {
                                                         egui::Color32::from_rgb(255, 255, 100)
-                                                    } else if log.contains("[Whisper]") {
+                                                    } else if log.contains("[Whisper]")
+                                                        || log.contains("[llm]")
+                                                    {
                                                         egui::Color32::from_rgb(200, 150, 255)
                                                     } else if log.contains("[Startup]")
                                                         || log.contains("[Tray]")
@@ -762,6 +815,7 @@ impl eframe::App for WhisperApp {
             let s = self.settings_window.get_settings();
             // Clipboard always enabled; toggle only auto-paste
             self.core.set_behavior_options(true, s.auto_paste);
+            let llm_settings_snapshot = s.llm_postprocess.clone();
             // Apply Whisper language (auto: None)
             let lang_opt = if s.whisper_language == "auto" {
                 None
@@ -806,6 +860,9 @@ impl eframe::App for WhisperApp {
             if let Some(entries) = self.settings_window.take_dictionary_to_apply() {
                 self.core.set_dictionary_entries(entries);
             }
+
+            self.core
+                .set_llm_postprocess_settings(llm_settings_snapshot);
         }
 
         // Drain SettingsWindow-generated update logs into Debug Log tab

@@ -33,6 +33,13 @@ pub fn write_status(state: SimpleRecState) {
             "processing",
             "proc",
         ),
+        SimpleRecState::PostProcessing => (
+            "●",
+            &i18n::tr("status-post-processing"),
+            "#4b9af2",
+            "post_processing",
+            "llm",
+        ),
         SimpleRecState::Busy => ("●", &i18n::tr("status-busy"), "#6c757d", "busy", "busy"),
     };
     let json = format!(
