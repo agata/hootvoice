@@ -3,7 +3,6 @@ use crate::llm::{
     history_file_path, record_history, LlmPostProcessSettings, LlmPostProcessor,
     MAX_HISTORY_ENTRIES,
 };
-use similar::{ChangeTag, TextDiff};
 use std::sync::{Arc, Mutex};
 
 pub struct PostProcessResult {
@@ -66,7 +65,7 @@ impl PostProcessEngine {
 
         let mut final_text = base_text.to_string();
         let mut llm_latency_secs = 0.0f32;
-        let mut llm_output_for_diff: Option<String> = None;
+        let mut llm_output_for_log: Option<String> = None;
 
         let mut history_payload: Option<(String, bool, u128)> = None;
         match self
@@ -93,7 +92,7 @@ impl PostProcessEngine {
                     &format!("[llm] Completed in {:.2}s.", llm_latency_secs),
                 );
                 log_message(log, &format!("[llm][output] {}", content));
-                llm_output_for_diff = Some(content.clone());
+                llm_output_for_log = Some(content.clone());
                 if snapshot.apply_to_autopaste {
                     final_text = content.clone();
                 } else {
@@ -144,41 +143,11 @@ impl PostProcessEngine {
             }
         }
 
-        if let Some(output_text) = llm_output_for_diff.as_ref() {
+        if let Some(output_text) = llm_output_for_log.as_ref() {
             if output_text == base_text {
                 log_message(log, "[llm] Output identical to Whisper text.");
             } else {
-                let diff = TextDiff::from_lines(base_text, output_text);
-                let mut diff_lines = Vec::new();
-                let mut truncated = false;
-                for change in diff.iter_all_changes() {
-                    let prefix = match change.tag() {
-                        ChangeTag::Delete => "-",
-                        ChangeTag::Insert => "+",
-                        ChangeTag::Equal => continue,
-                    };
-                    if diff_lines.len() >= 120 {
-                        truncated = true;
-                        break;
-                    }
-                    let mut line = change.value().trim_end_matches('\n').to_string();
-                    if line.chars().count() > 200 {
-                        let mut truncated = String::with_capacity(201);
-                        truncated.extend(line.chars().take(200));
-                        truncated.push_str("…");
-                        line = truncated;
-                    }
-                    diff_lines.push(format!("{}{}", prefix, line));
-                }
-
-                if diff_lines.is_empty() {
-                    log_message(log, "[llm] Output identical to Whisper text.");
-                } else {
-                    if truncated {
-                        diff_lines.push("... (diff truncated)".to_string());
-                    }
-                    log_message(log, &format!("[llm][diff]\n{}", diff_lines.join("\n")));
-                }
+                log_message(log, "[llm] Output differs from Whisper text.");
             }
         }
 

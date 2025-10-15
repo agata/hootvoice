@@ -1,6 +1,6 @@
 [package]
 name = "hootvoice"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["HootVoice Team"]
 description = "HootVoice — High‑accuracy voice input (Whisper)"
@@ -42,7 +42,6 @@ serde_json = "1.0"
 toml = "0.8"
 serde_yaml = "0.9"
 image = { version = "0.24", default-features = false, features = ["png", "jpeg"] }
-similar = "2.6"
 
 # GUI
 egui = "0.32"
