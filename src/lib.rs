@@ -5,6 +5,7 @@ pub mod dictionary;
 pub mod gui;
 pub mod hotkey;
 pub mod i18n;
+pub mod llm;
 pub mod transcription;
 pub mod utils;
 

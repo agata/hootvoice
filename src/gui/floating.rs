@@ -122,6 +122,7 @@ impl FloatingWindow {
                                 SimpleRecState::Idle => Icon::Pause,
                                 SimpleRecState::Recording => Icon::Mic,
                                 SimpleRecState::Processing => Icon::Loader,
+                                SimpleRecState::PostProcessing => Icon::Loader,
                                 SimpleRecState::Busy => Icon::Loader,
                             }
                             .unicode();
@@ -130,6 +131,9 @@ impl FloatingWindow {
                                 SimpleRecState::Idle => egui::Color32::from_rgb(40, 167, 69), // green
                                 SimpleRecState::Recording => egui::Color32::from_rgb(220, 53, 69), // red
                                 SimpleRecState::Processing => egui::Color32::from_rgb(255, 193, 7), // yellow
+                                SimpleRecState::PostProcessing => {
+                                    egui::Color32::from_rgb(75, 154, 242)
+                                } // blue
                                 SimpleRecState::Busy => egui::Color32::from_rgb(108, 117, 125), // gray
                             };
 
@@ -146,6 +150,7 @@ impl FloatingWindow {
                                 .clicked();
                             if rec_clicked
                                 && state != SimpleRecState::Processing
+                                && state != SimpleRecState::PostProcessing
                                 && state != SimpleRecState::Busy
                             {
                                 self.core.toggle_recording();

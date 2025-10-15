@@ -4,10 +4,15 @@ use std::time::Instant;
 
 use whisper_rs::WhisperContext;
 
+use super::{
+    postprocess::{PostProcessEngine, PostProcessResult},
+    SimpleRecState,
+};
 use crate::app::chunk_processor::ChunkProcessor;
 use crate::audio::VadStrategy;
 use crate::core::LogCallback;
 use crate::dictionary::{apply_pairs, flatten_sorted_with_context, DictionaryEntry};
+use crate::llm::LlmPostProcessSettings;
 use crate::transcription::WhisperOptimizationParams;
 
 #[derive(Clone)]
@@ -26,6 +31,8 @@ pub struct Transcriber {
 
     pub auto_stop_silence_secs: Arc<Mutex<f32>>, // 0 disables
     pub max_record_secs: Arc<Mutex<f32>>,        // 0 disables
+    pub postprocess: PostProcessEngine,
+    pub state: Arc<Mutex<SimpleRecState>>,
 }
 
 impl Transcriber {
@@ -42,6 +49,8 @@ impl Transcriber {
         dictionary_entries: Arc<Mutex<Vec<DictionaryEntry>>>,
         auto_stop_silence_secs: Arc<Mutex<f32>>,
         max_record_secs: Arc<Mutex<f32>>,
+        postprocess: PostProcessEngine,
+        state: Arc<Mutex<SimpleRecState>>,
     ) -> Self {
         Self {
             ctx,
@@ -55,6 +64,8 @@ impl Transcriber {
             dictionary_entries,
             auto_stop_silence_secs,
             max_record_secs,
+            postprocess,
+            state,
         }
     }
 
@@ -277,7 +288,13 @@ impl Transcriber {
         Self::log_with_callback(log, &format!("[Whisper] Combined result: {}", full_text));
 
         // Dictionary
-        let corrected_text = self.apply_dictionary_to_text(&full_text);
+        let dictionary_snapshot = self.dictionary_entries.lock().unwrap().clone();
+        let pairs = flatten_sorted_with_context(&dictionary_snapshot, &full_text);
+        let corrected_text = if pairs.is_empty() {
+            full_text.clone()
+        } else {
+            apply_pairs(&full_text, &pairs)
+        };
         if corrected_text != full_text {
             Self::log_with_callback(
                 log,
@@ -286,8 +303,22 @@ impl Transcriber {
         } else {
             Self::log_with_callback(log, "[Dictionary] No change (no matches)");
         }
+        let dictionary_prompt = Self::dictionary_prompt_text(&dictionary_snapshot);
 
-        output.apply_output(&corrected_text);
+        let language_setting = self.language.lock().unwrap().clone();
+        let language_hint = language_setting.as_deref();
+        let PostProcessResult {
+            final_text,
+            llm_latency_secs,
+        } = self.postprocess.process(
+            &corrected_text,
+            dictionary_prompt.as_deref(),
+            language_hint,
+            log,
+        );
+
+        output.apply_output(&final_text);
+        crate::utils::sound::stop_loop("processing");
 
         // Performance info
         let recording_duration = {
@@ -306,7 +337,13 @@ impl Transcriber {
             log,
             &format!("  🔄 Whisper processing: {:.2}s", whisper_processing_time),
         );
-        let total = whisper_processing_time + 0.0;
+        if llm_latency_secs > 0.0 {
+            Self::log_with_callback(
+                log,
+                &format!("  🤖 LLM processing: {:.2}s", llm_latency_secs),
+            );
+        }
+        let total = whisper_processing_time + llm_latency_secs;
         Self::log_with_callback(log, &format!("  ⏱️  Total processing time: {:.2}s", total));
         if recording_duration > 0.0 {
             Self::log_with_callback(
@@ -319,15 +356,41 @@ impl Transcriber {
         } else {
             Self::log_with_callback(log, "  ⚡ RTF (Real Time Factor): N/A\n");
         }
+
+        if let Ok(mut state) = self.state.lock() {
+            *state = SimpleRecState::Idle;
+        }
     }
 
-    fn apply_dictionary_to_text(&self, text: &str) -> String {
-        let entries = self.dictionary_entries.lock().unwrap();
-        if entries.is_empty() {
-            return text.to_string();
+    fn dictionary_prompt_text(entries: &[DictionaryEntry]) -> Option<String> {
+        const MAX_LINES: usize = 40;
+        let mut lines = Vec::new();
+        for entry in entries {
+            if entry.aliases.is_empty() {
+                continue;
+            }
+            let mut line = format!("- {}: {}", entry.canonical, entry.aliases.join(", "));
+            if !entry.include.is_empty() {
+                line.push_str(" (context: ");
+                line.push_str(&entry.include.join(", "));
+                line.push(')');
+            }
+            lines.push(line);
+            if lines.len() >= MAX_LINES {
+                break;
+            }
         }
-        let pairs = flatten_sorted_with_context(&entries, text);
-        apply_pairs(text, &pairs)
+        if lines.is_empty() {
+            None
+        } else {
+            let mut prompt = String::from("User dictionary replacements:\n");
+            prompt.push_str(&lines.join("\n"));
+            Some(prompt)
+        }
+    }
+
+    pub fn set_llm_settings(&self, settings: LlmPostProcessSettings) {
+        self.postprocess.set_settings(settings);
     }
 
     fn log_with_callback(log_callback: &Arc<Mutex<Option<LogCallback>>>, message: &str) {

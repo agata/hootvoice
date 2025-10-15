@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HootVoice — LLM 後処理セットアップガイド</title>
+    <meta name="description" content="HootVoice の LLM 後処理機能をセットアップするための手順。Ollama または LM Studio を使った環境構築や推奨モデル情報を紹介します。" />
+    <meta name="theme-color" content="#3b53ff" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="lang-switch small"><a href="https://hootvoice.com/llm-postprocess.html">English</a></div>
+      <nav class="doc-nav small">
+        <a class="btn" href="https://hootvoice.com/index.ja.html"><i data-lucide="home" aria-hidden="true"></i>トップページ</a>
+        <a class="btn" href="https://hootvoice.com/manual.ja.html#llm-postprocess"><i data-lucide="book" aria-hidden="true"></i>ユーザーマニュアル</a>
+      </nav>
+      <div class="container">
+        <h1>LLM 後処理セットアップガイド</h1>
+        <p class="lead">Whisper の文字起こし結果を LLM で整形・要約する仕組みと、Ollama / LM Studio を使った導入手順をまとめました。</p>
+      </div>
+    </header>
+    <main class="container">
+      <nav class="toc">
+        <h2>目次</h2>
+        <ol>
+          <li><a href="#overview">概要</a></li>
+          <li><a href="#flow">仕組み</a></li>
+          <li><a href="#checklist">導入チェックリスト</a></li>
+          <li><a href="#ollama">Ollama を使う</a></li>
+          <li><a href="#lmstudio">LM Studio を使う</a></li>
+          <li><a href="#models">推奨モデル</a></li>
+          <li><a href="#troubleshooting">トラブルシューティング</a></li>
+        </ol>
+      </nav>
+
+      <section id="overview">
+        <h2>概要</h2>
+        <p>LLM 後処理機能を有効にすると、Whisper が出力したテキストをローカルの LLM API に送り、句読点整形・敬体化・要約などを自動で行えます。API は OpenAI 互換エンドポイントを想定しており、Ollama や LM Studio と組み合わせて利用します。</p>
+        <p>初期設定では無効になっているため、アプリの「設定 → LLM」で「LLM による後処理を有効化」をオンにしたうえで、API ベース URL やモデル名を指定してください。</p>
+      </section>
+
+      <section id="flow">
+        <h2>仕組み</h2>
+        <ol>
+          <li>HootVoice が音声を Whisper で文字起こしします。</li>
+          <li>文字起こしが完了すると、指定した LLM API に <code>/v1/chat/completions</code> リクエストを送信します。</li>
+          <li>LLM が整形したテキストが戻り、ログに結果が記録されます。</li>
+          <li>自動ペーストが有効な場合は、LLM の結果がそのまま前面アプリに貼り付けられます。</li>
+        </ol>
+        <p>API が応答しない場合やエラーが発生した場合は、従来どおり Whisper の生テキストを使用します。ログには HTTP ステータスやエラーメッセージが記録されるため、問題の切り分けに活用できます。</p>
+      </section>
+
+      <section id="checklist">
+        <h2>導入チェックリスト</h2>
+        <ul>
+          <li>ローカル PC 上で OpenAI 互換 API（Ollama または LM Studio）が待ち受けていること</li>
+          <li>使用したい LLM モデルがあらかじめダウンロード済みであること</li>
+          <li><code>curl</code> などで <code>/v1/models</code> や <code>/v1/chat/completions</code> にアクセスできること</li>
+          <li>アプリの設定で API ベース URL とモデル名を正しく指定していること</li>
+        </ul>
+      </section>
+
+      <section id="ollama">
+        <h2>Ollama を使う</h2>
+        <p>Ollama はシンプルな CLI/サービスで、`http://localhost:11434/v1` に OpenAI 互換の REST API を提供します。HootVoice の既定値とも一致します。</p>
+        <h3 id="ollama-macos">macOS</h3>
+        <ol>
+          <li><code>brew install ollama</code> を実行（Homebrew が必要）。</li>
+          <li><code>ollama run llama3.1:8b</code> などで初回モデルをダウンロードして動作確認。</li>
+          <li>常駐させる場合は <code>ollama serve</code> を起動するか、Ollama.app をログイン項目に追加。</li>
+        </ol>
+        <h3 id="ollama-windows">Windows</h3>
+        <ol>
+          <li><a href="https://ollama.com/download/windows">Ollama for Windows</a> をダウンロードしてインストール。</li>
+          <li>インストール後に PowerShell で <code>ollama run llama3.1:8b</code> を実行しモデルを取得。</li>
+          <li>サービスは自動的にバックグラウンドで起動します。必要に応じてタスクトレイから制御してください。</li>
+        </ol>
+        <h3 id="ollama-linux">Linux</h3>
+        <ol>
+          <li><code>curl https://ollama.ai/install.sh | sh</code> を実行。</li>
+          <li><code>systemctl --user enable --now ollama</code> でユーザーサービスとして常駐させます。</li>
+          <li><code>ollama run llama3.1:8b</code> でモデルをダウンロードし、API が応答するか確認。</li>
+        </ol>
+        <p>接続テストには以下のコマンドが利用できます。</p>
+        <pre><code class="language-bash">curl http://localhost:11434/v1/models</code></pre>
+      </section>
+
+      <section id="lmstudio">
+        <h2>LM Studio を使う</h2>
+        <p>LM Studio は GUI ベースでモデル管理が行いやすく、OpenAI 互換サーバーも同梱されています。既定ポートは <code>1234</code> なので、HootVoice の URL を <code>http://localhost:1234/v1</code> に変更してください。</p>
+        <h3 id="lmstudio-macos">macOS</h3>
+        <ol>
+          <li><a href="https://lmstudio.ai/">公式サイト</a> から DMG をダウンロードしてインストール。</li>
+          <li>起動後、「Download Models」から利用したいモデルを追加。</li>
+          <li>画面右上の「Start Server」を押し、「OpenAI Compatible Server」を有効化。</li>
+        </ol>
+        <h3 id="lmstudio-windows">Windows</h3>
+        <ol>
+          <li>インストーラーをダウンロードし実行。既定設定で問題ありません。</li>
+          <li>アプリ内でモデルをダウンロード後、「Server」タブからサーバーを起動。</li>
+          <li>必要に応じてスタートアップ登録し、自動起動を有効にします。</li>
+        </ol>
+        <h3 id="lmstudio-linux">Linux</h3>
+        <ol>
+          <li>AppImage または Debian パッケージを入手して実行。</li>
+          <li>モデルをダウンロードしたら、右上のサーバースイッチをオンにします。</li>
+          <li>初回はファイアウォールでポート 1234 へのアクセス許可が必要な場合があります。</li>
+        </ol>
+        <p>API が起動しているかどうかは以下で確認できます。</p>
+        <pre><code class="language-bash">curl http://localhost:1234/v1/models</code></pre>
+      </section>
+
+      <section id="models">
+        <h2>推奨モデル</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>用途</th>
+              <th>モデル</th>
+              <th>備考</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>日本語の整形・敬体化</td>
+              <td><code>llama3.1:8b</code>（Ollama）、<code>Meta-Llama-3-8B-Instruct</code>（LM Studio）</td>
+              <td>軽量で多言語対応。メモリ 8GB 前後で稼働。</td>
+            </tr>
+            <tr>
+              <td>英語中心の要約</td>
+              <td><code>qwen2.5:7b-instruct</code> / <code>Phi-3.5-mini-instruct</code></td>
+              <td>高速レスポンス。要約プロンプトと相性良好。</td>
+            </tr>
+            <tr>
+              <td>精度重視</td>
+              <td><code>llama3.1:70b</code> などの大型モデル</td>
+              <td>高性能 GPU/VRAM が必要。Ollama では <code>OLLAMA_NUM_PARALLEL</code> で調整。</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>モデル名は API に合わせて指定する必要があります。Ollama の場合は <code>ollama list</code> で確認でき、LM Studio では「Local Models」一覧の識別子を利用します。</p>
+      </section>
+
+      <section id="troubleshooting">
+        <h2>トラブルシューティング</h2>
+        <ul>
+          <li>「HTTP 404 /v1/chat/completions」エラー: API ベース URL に <code>/v1</code> を含めているか確認。</li>
+          <li>タイムアウトする: モデル読み込みに時間がかかるため、初回は 30 秒以上待つか、小型モデルで試す。</li>
+          <li>英語で返ってくる: 設定の「プロンプト言語を固定」を日本語に変更、またはプロンプト内で言語指定を追加。</li>
+          <li>CPU/GPU 使用率が高い: Ollama の <code>ollama run</code> に <code>-ngl</code> オプションを付けて量子化版を使うか、小型モデルを選択。</li>
+        </ul>
+        <p>それでも解決しない場合は、アプリのログウィンドウから該当するリクエスト/レスポンスをコピーし、開発チームまで共有してください。</p>
+      </section>
+    </main>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+      lucide.createIcons();
+    </script>
+  </body>
+</html>

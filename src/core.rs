@@ -11,9 +11,11 @@ use whisper_rs::{WhisperContext, WhisperContextParameters};
 
 mod audio_io;
 mod output;
+mod postprocess;
 mod transcriber;
 use crate::audio::VadStrategy;
 use crate::dictionary::DictionaryEntry;
+use crate::llm::{LlmPostProcessSettings, LlmPostProcessor};
 use crate::transcription::ensure_model;
 use crate::transcription::WhisperOptimizationParams;
 use crate::utils::sound;
@@ -26,6 +28,7 @@ pub enum SimpleRecState {
     Idle,
     Recording,
     Processing,
+    PostProcessing,
     Busy,
 }
 
@@ -41,6 +44,7 @@ pub struct WhisperCore {
     processing_thread: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
     current_model_path: Arc<Mutex<std::path::PathBuf>>,
     preferred_output_device: Arc<Mutex<Option<String>>>,
+    llm_settings: Arc<Mutex<LlmPostProcessSettings>>,
     #[cfg(target_os = "macos")]
     front_app_before_paste: Arc<Mutex<Option<String>>>,
 
@@ -91,6 +95,13 @@ impl WhisperCore {
         let current_session = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let auto_stop_silence_secs = Arc::new(Mutex::new(10.0));
         let max_record_secs = Arc::new(Mutex::new(600.0));
+        let llm_settings = Arc::new(Mutex::new(LlmPostProcessSettings::default()));
+        let llm_processor = Arc::new(LlmPostProcessor::new());
+        let postprocess_engine = postprocess::PostProcessEngine::new(
+            llm_settings.clone(),
+            llm_processor.clone(),
+            state.clone(),
+        );
         #[cfg(target_os = "macos")]
         let front_app_before_paste = Arc::new(Mutex::new(None));
 
@@ -117,6 +128,8 @@ impl WhisperCore {
             dictionary_entries.clone(),
             auto_stop_silence_secs.clone(),
             max_record_secs.clone(),
+            postprocess_engine.clone(),
+            state.clone(),
         );
         let out = output::OutputBehavior::new(
             behavior.clone(),
@@ -134,6 +147,7 @@ impl WhisperCore {
             processing_thread,
             current_model_path,
             preferred_output_device,
+            llm_settings,
             #[cfg(target_os = "macos")]
             front_app_before_paste,
             audio,
@@ -209,6 +223,10 @@ impl WhisperCore {
                 self.log("[Warning] Already processing");
                 SimpleRecState::Processing
             }
+            SimpleRecState::PostProcessing => {
+                self.log("[Warning] Already processing");
+                SimpleRecState::PostProcessing
+            }
             SimpleRecState::Busy => {
                 self.log("[Warning] State busy");
                 SimpleRecState::Busy
@@ -268,6 +286,11 @@ impl WhisperCore {
     // Auto-stop by silence/max duration (0 disables each)
     pub fn set_auto_stop_params(&self, silence_secs: f32, max_secs: f32) {
         self.trans.set_auto_stop_params(silence_secs, max_secs);
+    }
+
+    pub fn set_llm_postprocess_settings(&self, settings: LlmPostProcessSettings) {
+        *self.llm_settings.lock().unwrap() = settings.clone();
+        self.trans.set_llm_settings(settings);
     }
 
     // Behavior options reflected from GUI settings

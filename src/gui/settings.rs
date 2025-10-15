@@ -3,15 +3,21 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 // ProjectDirs and utility imports moved to submodules
 use crate::i18n;
+use crate::llm::{
+    builtin_prompt_preview, history_modified_time, load_history_entries, ConnectionTestOutcome,
+    LlmHistoryEntry, LlmModelInfo, LlmPostProcessSettings, LlmPostProcessor, PostProcessOutcome,
+    DEFAULT_LOCAL_BASE_URL, MODE_ID_CUSTOM_DRAFT, PRESET_ID_FORMAT, PRESET_ID_SUMMARY,
+};
 use crate::transcription::SUPPORTED_MODELS;
 use crate::utils::update::{releases_latest_url, spawn_check_update, AvailableUpdate, UpdateState};
-use crate::utils::{open::open_url, reveal_in_file_manager, update};
-use std::sync::{Arc, Mutex};
+use crate::utils::{open::open_url, update};
+use std::sync::{mpsc, Arc, Mutex};
 // (kept above) use std::sync::atomic::{AtomicBool, Ordering};
 use crate::audio::VadStrategy;
 use std::sync::atomic::AtomicBool;
 // device trait usage moved to submodules
-use std::time::Instant;
+use chrono::Local;
+use std::time::{Instant, SystemTime};
 // moved audio test helpers into submodule; keep imports local there
 
 // removed: correction feature
@@ -33,6 +39,33 @@ const THIRD_PARTY_LICENSES_MD: &str = include_str!(concat!(
     "/assets/THIRD_PARTY_LICENSES.md"
 ));
 
+#[derive(Clone, Debug)]
+struct LlmModelOption {
+    id: String,
+    label: String,
+}
+
+#[derive(Default)]
+struct LlmPromptTestState {
+    open: bool,
+    in_progress: bool,
+    selected_entry: Option<usize>,
+    output: Option<String>,
+    latency_ms: Option<u128>,
+    truncated_input: bool,
+    error: Option<String>,
+}
+
+fn is_builtin_mode_id(id: &str) -> bool {
+    matches!(id, PRESET_ID_FORMAT | PRESET_ID_SUMMARY)
+}
+
+enum LlmUiMessage {
+    TestResult(Result<ConnectionTestOutcome, String>),
+    ModelList(Result<Vec<LlmModelInfo>, String>),
+    PromptTest(Result<PostProcessOutcome, String>),
+}
+
 // Legacy tab enum removed (unused)
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -53,6 +86,7 @@ pub struct Settings {
     pub use_clipboard: bool,
     pub floating_opacity: f32,
     pub floating_always_on_top: bool,
+    pub llm_postprocess: LlmPostProcessSettings,
     // Last floating window position (screen coords after OS scale)
     pub floating_position: Option<[f32; 2]>,
     pub whisper_no_timestamps: bool,
@@ -92,6 +126,7 @@ impl Default for Settings {
             use_clipboard: true,
             floating_opacity: 1.0,
             floating_always_on_top: true,
+            llm_postprocess: LlmPostProcessSettings::default(),
             floating_position: None,
             whisper_no_timestamps: true,
             whisper_token_timestamps: false,
@@ -164,6 +199,22 @@ pub struct SettingsWindow {
     pub(crate) dict_editor_includes: Vec<String>,
     // Dictionary list search filter
     pub(crate) dict_filter_text: String,
+    // LLM post-processing UI state
+    llm_model_options: Vec<LlmModelOption>,
+    llm_fetching_models: bool,
+    llm_fetch_error: Option<String>,
+    llm_test_in_progress: bool,
+    llm_test_message: Option<String>,
+    llm_test_error: Option<String>,
+    llm_async_tx: mpsc::Sender<LlmUiMessage>,
+    llm_async_rx: mpsc::Receiver<LlmUiMessage>,
+    llm_custom_error: Option<String>,
+    llm_mode_loaded_id: Option<String>,
+    llm_prompt_test: LlmPromptTestState,
+    llm_history_entries: Vec<LlmHistoryEntry>,
+    llm_history_error: Option<String>,
+    llm_history_last_modified: Option<SystemTime>,
+    llm_history_selected: Option<usize>,
     // Update check state (GitHub Releases)
     update_state: Arc<Mutex<UpdateState>>,
     update_downloading: Arc<Mutex<bool>>,
@@ -177,6 +228,7 @@ pub struct SettingsWindow {
 impl SettingsWindow {
     pub fn new() -> Self {
         let settings = Self::load_settings().unwrap_or_default();
+        let (llm_async_tx, llm_async_rx) = mpsc::channel();
         let mut this = Self {
             hotkey_input: settings.hotkey_recording.clone(),
             original_settings: settings.clone(),
@@ -219,6 +271,21 @@ impl SettingsWindow {
             dict_editor_aliases: Vec::new(),
             dict_editor_includes: Vec::new(),
             dict_filter_text: String::new(),
+            llm_model_options: Vec::new(),
+            llm_fetching_models: false,
+            llm_fetch_error: None,
+            llm_test_in_progress: false,
+            llm_test_message: None,
+            llm_test_error: None,
+            llm_async_tx,
+            llm_async_rx,
+            llm_custom_error: None,
+            llm_mode_loaded_id: None,
+            llm_prompt_test: LlmPromptTestState::default(),
+            llm_history_entries: Vec::new(),
+            llm_history_error: None,
+            llm_history_last_modified: None,
+            llm_history_selected: None,
             update_state: Arc::new(Mutex::new(UpdateState::Checking)),
             update_downloading: Arc::new(Mutex::new(false)),
             update_progress: Arc::new(Mutex::new(None)),
@@ -259,11 +326,168 @@ impl SettingsWindow {
                 this.dict_dirty = false;
             }
         }
+        this.settings.llm_postprocess.ensure_mode_valid();
+        this.sync_llm_custom_editor();
         // Initialize UI language (switch Fluent based on the setting)
         crate::i18n::set_ui_language_preference(&this.settings.ui_language);
         // Kick off one-shot update check (background)
         spawn_check_update(this.update_state.clone(), Some(this.update_logs.clone()));
+        this.reload_llm_history();
         this
+    }
+
+    fn poll_llm_messages(&mut self) {
+        loop {
+            match self.llm_async_rx.try_recv() {
+                Ok(LlmUiMessage::TestResult(result)) => {
+                    self.llm_test_in_progress = false;
+                    match result {
+                        Ok(outcome) => {
+                            let seconds = outcome.duration_ms as f32 / 1000.0;
+                            self.llm_test_message = Some(format!(
+                                "{} (status: {}, {:.2}s)",
+                                outcome.message,
+                                outcome
+                                    .status
+                                    .map(|s| s.to_string())
+                                    .unwrap_or_else(|| "n/a".to_string()),
+                                seconds
+                            ));
+                            self.llm_test_error = None;
+                        }
+                        Err(err) => {
+                            self.llm_test_error = Some(err);
+                            self.llm_test_message = None;
+                        }
+                    }
+                }
+                Ok(LlmUiMessage::ModelList(result)) => {
+                    self.llm_fetching_models = false;
+                    match result {
+                        Ok(models) => {
+                            self.llm_model_options = models
+                                .into_iter()
+                                .map(|info| LlmModelOption {
+                                    id: info.id,
+                                    label: info.label,
+                                })
+                                .collect();
+                            self.llm_fetch_error = None;
+                        }
+                        Err(err) => {
+                            self.llm_fetch_error = Some(err);
+                        }
+                    }
+                }
+                Ok(LlmUiMessage::PromptTest(result)) => {
+                    self.llm_prompt_test.in_progress = false;
+                    match result {
+                        Ok(outcome) => {
+                            self.llm_prompt_test.output = Some(outcome.content);
+                            self.llm_prompt_test.latency_ms = Some(outcome.latency_ms);
+                            self.llm_prompt_test.truncated_input = outcome.truncated_input;
+                            self.llm_prompt_test.error = None;
+                        }
+                        Err(err) => {
+                            self.llm_prompt_test.error = Some(err);
+                            self.llm_prompt_test.output = None;
+                            self.llm_prompt_test.latency_ms = None;
+                            self.llm_prompt_test.truncated_input = false;
+                        }
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+            }
+        }
+    }
+
+    fn reload_llm_history(&mut self) {
+        match load_history_entries() {
+            Ok(entries) => {
+                self.llm_history_entries = entries;
+                self.llm_history_error = None;
+            }
+            Err(err) => {
+                self.llm_history_entries.clear();
+                self.llm_history_error = Some(format!(
+                    "{}: {}",
+                    i18n::tr("msg-llm-history-load-failed"),
+                    err
+                ));
+            }
+        }
+        self.llm_history_last_modified = history_modified_time();
+        let len = self.llm_history_entries.len();
+        if len == 0 {
+            self.llm_history_selected = None;
+            self.llm_prompt_test.selected_entry = None;
+        } else if let Some(sel) = self.llm_history_selected {
+            if sel >= len {
+                self.llm_history_selected = Some(len - 1);
+            }
+            if let Some(test_sel) = self.llm_prompt_test.selected_entry {
+                if test_sel >= len {
+                    self.llm_prompt_test.selected_entry = Some(len - 1);
+                }
+            } else {
+                self.llm_prompt_test.selected_entry = Some(len - 1);
+            }
+        } else {
+            self.llm_history_selected = Some(len - 1);
+            if self.llm_prompt_test.selected_entry.is_none() {
+                self.llm_prompt_test.selected_entry = Some(len - 1);
+            }
+        }
+    }
+
+    fn refresh_llm_history_if_needed(&mut self) {
+        let current = history_modified_time();
+        let should_reload = match (self.llm_history_last_modified, current) {
+            (None, None) => self.llm_history_entries.is_empty() || self.llm_history_error.is_some(),
+            (None, Some(_)) => true,
+            (Some(_), None) => true,
+            (Some(prev), Some(cur)) => prev != cur,
+        };
+        if should_reload {
+            self.reload_llm_history();
+        }
+    }
+
+    fn format_history_timestamp(ts: &str) -> String {
+        chrono::DateTime::parse_from_rfc3339(ts)
+            .map(|dt| {
+                dt.with_timezone(&Local)
+                    .format("%Y-%m-%d %H:%M:%S")
+                    .to_string()
+            })
+            .unwrap_or_else(|_| ts.to_string())
+    }
+
+    fn format_history_language(lang: &Option<String>) -> String {
+        match lang {
+            Some(code) if !code.trim().is_empty() => code.clone(),
+            _ => i18n::tr("label-llm-history-language-auto"),
+        }
+    }
+
+    fn history_entry_preview(entry: &LlmHistoryEntry) -> String {
+        let timestamp = Self::format_history_timestamp(&entry.timestamp);
+        let mut preview: String = entry.transcript.chars().take(32).collect();
+        preview = preview.replace('\n', " ");
+        let trimmed = preview.trim();
+        if trimmed.is_empty() {
+            timestamp
+        } else {
+            format!("{} • {}", timestamp, trimmed)
+        }
+    }
+
+    fn clear_llm_prompt_test_result(&mut self) {
+        self.llm_prompt_test.output = None;
+        self.llm_prompt_test.error = None;
+        self.llm_prompt_test.latency_ms = None;
+        self.llm_prompt_test.truncated_input = false;
     }
 
     // Persist flag when mic preflight succeeds
@@ -1063,6 +1287,936 @@ impl SettingsWindow {
                             );
                         });
                 });
+        }
+    }
+
+    pub fn ui_section_llm(&mut self, ui: &mut egui::Ui) {
+        let heading = egui::RichText::new(i18n::tr("heading-llm"))
+            .color(ui.visuals().strong_text_color())
+            .strong();
+        ui.heading(heading);
+        ui.add_space(5.0);
+        self.poll_llm_messages();
+
+        egui::Frame::default()
+            .fill(ui.visuals().faint_bg_color)
+            .corner_radius(egui::CornerRadius::same(6))
+            .inner_margin(egui::Margin::symmetric(16, 12))
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.add(egui::Label::new(i18n::tr("llm-description")).wrap());
+                ui.add_space(8.0);
+                if ui.link(i18n::tr("link-llm-doc")).clicked() {
+                    open_url("https://hootvoice.com/llm-postprocess.html");
+                }
+                ui.add_space(8.0);
+
+                let mut enabled = self.settings.llm_postprocess.enabled;
+                if ui
+                    .checkbox(&mut enabled, i18n::tr("label-llm-enable"))
+                    .changed()
+                {
+                    self.settings.llm_postprocess.enabled = enabled;
+                    self.check_changes();
+                }
+
+                if self.settings.llm_postprocess.enabled {
+                    self.ui_llm_details(ui);
+                }
+                ui.add_space(10.0);
+            });
+    }
+
+    fn ui_llm_details(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(8.0);
+
+        let mut base = self.settings.llm_postprocess.api_base_url.clone();
+        let mut base_changed = false;
+        ui.horizontal(|ui| {
+            ui.label(i18n::tr("label-llm-api-base"));
+            if ui
+                .add(
+                    egui::TextEdit::singleline(&mut base)
+                        .desired_width(260.0)
+                        .hint_text(i18n::tr("placeholder-llm-api-base")),
+                )
+                .changed()
+            {
+                base_changed = true;
+            }
+        });
+        if base_changed {
+            if base.trim().is_empty() {
+                self.settings.llm_postprocess.api_base_url = DEFAULT_LOCAL_BASE_URL.to_string();
+            } else {
+                self.settings.llm_postprocess.api_base_url = base;
+            }
+            self.check_changes();
+        }
+        ui.small(i18n::tr("note-llm-api-base-local"));
+        if let Some(msg) = &self.llm_test_message {
+            ui.colored_label(egui::Color32::LIGHT_GREEN, msg);
+        }
+        if let Some(err) = &self.llm_test_error {
+            ui.colored_label(egui::Color32::YELLOW, err);
+        }
+
+        ui.add_space(6.0);
+        let mut model = self.settings.llm_postprocess.model.clone();
+        let mut model_changed = false;
+        ui.horizontal(|ui| {
+            ui.label(i18n::tr("label-llm-model"));
+            if ui
+                .add(
+                    egui::TextEdit::singleline(&mut model)
+                        .desired_width(200.0)
+                        .hint_text(i18n::tr("placeholder-llm-model")),
+                )
+                .changed()
+            {
+                model_changed = true;
+            }
+            if self.llm_fetching_models {
+                ui.spinner();
+            } else if !self.llm_model_options.is_empty() {
+                egui::ComboBox::from_id_salt("llm_model_candidates")
+                    .selected_text(i18n::tr("llm-model-dropdown-placeholder"))
+                    .show_ui(ui, |ui| {
+                        for opt in &self.llm_model_options {
+                            if ui.selectable_label(false, &opt.label).clicked() {
+                                model = opt.id.clone();
+                                model_changed = true;
+                            }
+                        }
+                    });
+            }
+            if ui
+                .button(i18n::tr("btn-llm-fetch-models"))
+                .on_hover_text(i18n::tr("tooltip-llm-fetch-models"))
+                .clicked()
+            {
+                self.request_llm_model_list();
+            }
+            ui.add_space(6.0);
+            if ui
+                .add_enabled(
+                    !self.llm_test_in_progress,
+                    egui::Button::new(i18n::tr("btn-llm-test-connection")),
+                )
+                .clicked()
+            {
+                self.request_llm_connection_test();
+            }
+            if self.llm_test_in_progress {
+                ui.spinner();
+            }
+        });
+        if let Some(err) = &self.llm_fetch_error {
+            ui.colored_label(egui::Color32::YELLOW, err);
+        } else if self.llm_model_options.is_empty() && !self.llm_fetching_models {
+            ui.small(i18n::tr("msg-llm-fetch-empty"));
+        }
+        if model_changed {
+            self.settings.llm_postprocess.model = model;
+            self.check_changes();
+        }
+
+        ui.add_space(6.0);
+        let language_hint = self.llm_language_hint();
+        let mut mode_id = self.settings.llm_postprocess.mode_id.clone();
+        let original_mode_id = mode_id.clone();
+        let mut mode_changed = false;
+        let mut new_custom_requested = false;
+        let mut mode_options = vec![
+            (PRESET_ID_FORMAT.to_string(), i18n::tr("llm-mode-format")),
+            (PRESET_ID_SUMMARY.to_string(), i18n::tr("llm-mode-summary")),
+        ];
+        for custom in &self.settings.llm_postprocess.custom_prompts {
+            mode_options.push((custom.id.clone(), custom.name.clone()));
+        }
+        mode_options.push((
+            MODE_ID_CUSTOM_DRAFT.to_string(),
+            i18n::tr("llm-mode-custom-add"),
+        ));
+
+        let current_label = if mode_id == MODE_ID_CUSTOM_DRAFT {
+            i18n::tr("llm-mode-custom-draft")
+        } else {
+            mode_options
+                .iter()
+                .find(|(id, _)| id == &mode_id)
+                .map(|(_, label)| label.clone())
+                .unwrap_or_else(|| mode_id.clone())
+        };
+
+        ui.horizontal(|ui| {
+            ui.label(i18n::tr("label-llm-mode"));
+            egui::ComboBox::from_id_salt("llm_mode_combo")
+                .selected_text(current_label)
+                .show_ui(ui, |ui| {
+                    for (id, label) in &mode_options {
+                        let selected = mode_id == *id;
+                        if ui.selectable_label(selected, label).clicked() {
+                            if mode_id != *id {
+                                mode_id = id.clone();
+                                mode_changed = true;
+                                if id == MODE_ID_CUSTOM_DRAFT {
+                                    new_custom_requested = true;
+                                }
+                            }
+                        }
+                    }
+                });
+            if self.settings.llm_postprocess.custom_prompts.is_empty() {
+                ui.label(
+                    egui::RichText::new(i18n::tr("llm-mode-custom-empty-hint"))
+                        .italics()
+                        .color(ui.visuals().weak_text_color()),
+                );
+            }
+        });
+
+        if mode_changed {
+            self.llm_custom_error = None;
+            self.llm_mode_loaded_id = None;
+            self.settings.llm_postprocess.mode_id = mode_id.clone();
+            if mode_id == MODE_ID_CUSTOM_DRAFT
+                && (new_custom_requested || original_mode_id != MODE_ID_CUSTOM_DRAFT)
+            {
+                self.settings
+                    .llm_postprocess
+                    .begin_custom_draft(language_hint.as_deref());
+            } else {
+                self.settings.llm_postprocess.ensure_mode_valid();
+            }
+            self.sync_llm_custom_editor();
+            self.check_changes();
+        } else {
+            self.sync_llm_custom_editor();
+        }
+
+        let is_custom_mode = !is_builtin_mode_id(&mode_id);
+        if !is_custom_mode {
+            let locales = self
+                .settings
+                .llm_postprocess
+                .locale_priority(language_hint.as_deref());
+            if let Some((system_preview, user_preview)) = builtin_prompt_preview(&mode_id, &locales)
+            {
+                ui.add_space(4.0);
+                ui.label(i18n::tr("label-llm-system"));
+                let mut system_display = system_preview.clone();
+                ui.add(
+                    egui::TextEdit::multiline(&mut system_display)
+                        .desired_rows(3)
+                        .desired_width(f32::INFINITY)
+                        .interactive(false),
+                );
+                ui.add_space(4.0);
+                ui.label(i18n::tr("label-llm-user"));
+                let mut user_display = user_preview.clone();
+                ui.add(
+                    egui::TextEdit::multiline(&mut user_display)
+                        .desired_rows(6)
+                        .desired_width(f32::INFINITY)
+                        .interactive(false),
+                );
+            }
+        }
+
+        if is_custom_mode {
+            ui.add_space(4.0);
+            if let Some(err) = &self.llm_custom_error {
+                ui.colored_label(egui::Color32::from_rgb(220, 80, 80), err);
+                ui.add_space(4.0);
+            }
+
+            let mut name_changed = false;
+            ui.horizontal(|ui| {
+                ui.label(i18n::tr("label-llm-custom-name"));
+                if ui
+                    .text_edit_singleline(&mut self.settings.llm_postprocess.custom_prompt_name)
+                    .changed()
+                {
+                    name_changed = true;
+                }
+            });
+            ui.add_space(4.0);
+            ui.label(i18n::tr("label-llm-system"));
+            let system_changed = ui
+                .add(
+                    egui::TextEdit::multiline(
+                        &mut self.settings.llm_postprocess.custom_prompt_system,
+                    )
+                    .desired_rows(3)
+                    .desired_width(f32::INFINITY),
+                )
+                .changed();
+            ui.add_space(4.0);
+            ui.label(i18n::tr("label-llm-user"));
+            let user_changed = ui
+                .add(
+                    egui::TextEdit::multiline(&mut self.settings.llm_postprocess.custom_prompt)
+                        .desired_rows(6)
+                        .desired_width(f32::INFINITY)
+                        .hint_text(i18n::tr("placeholder-llm-custom-prompt")),
+                )
+                .changed();
+
+            if name_changed || system_changed || user_changed {
+                self.check_changes();
+                if mode_id != MODE_ID_CUSTOM_DRAFT {
+                    let name_trimmed = self
+                        .settings
+                        .llm_postprocess
+                        .custom_prompt_name
+                        .trim()
+                        .to_string();
+                    let system_trimmed = self
+                        .settings
+                        .llm_postprocess
+                        .custom_prompt_system
+                        .trim()
+                        .to_string();
+                    let user_trimmed = self
+                        .settings
+                        .llm_postprocess
+                        .custom_prompt
+                        .trim()
+                        .to_string();
+                    if name_trimmed.is_empty() || user_trimmed.is_empty() {
+                        self.llm_custom_error = Some(i18n::tr("msg-llm-custom-invalid"));
+                    } else if self
+                        .settings
+                        .llm_postprocess
+                        .update_custom_mode(
+                            &mode_id,
+                            name_trimmed.as_str(),
+                            system_trimmed.as_str(),
+                            user_trimmed.as_str(),
+                        )
+                        .is_ok()
+                    {
+                        self.llm_custom_error = None;
+                        self.llm_mode_loaded_id = Some(mode_id.clone());
+                    } else {
+                        self.llm_custom_error = Some(i18n::tr("msg-llm-custom-update-failed"));
+                    }
+                }
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                let name_trimmed = self
+                    .settings
+                    .llm_postprocess
+                    .custom_prompt_name
+                    .trim()
+                    .to_string();
+                let system_trimmed = self
+                    .settings
+                    .llm_postprocess
+                    .custom_prompt_system
+                    .trim()
+                    .to_string();
+                let user_trimmed = self
+                    .settings
+                    .llm_postprocess
+                    .custom_prompt
+                    .trim()
+                    .to_string();
+
+                if mode_id == MODE_ID_CUSTOM_DRAFT {
+                    if ui
+                        .button(i18n::tr("btn-llm-save-custom"))
+                        .on_hover_text(i18n::tr("tooltip-llm-save-custom"))
+                        .clicked()
+                    {
+                        if name_trimmed.is_empty() || user_trimmed.is_empty() {
+                            self.llm_custom_error = Some(i18n::tr("msg-llm-custom-invalid"));
+                        } else {
+                            let new_id = self.settings.llm_postprocess.create_custom_mode(
+                                name_trimmed.as_str(),
+                                system_trimmed.as_str(),
+                                user_trimmed.as_str(),
+                            );
+                            self.settings.llm_postprocess.mode_id = new_id.clone();
+                            self.llm_mode_loaded_id = Some(new_id);
+                            self.llm_custom_error = None;
+                            self.sync_llm_custom_editor();
+                            self.check_changes();
+                        }
+                    }
+                } else {
+                    let duplicate_clicked = ui
+                        .button(i18n::tr("btn-llm-duplicate-custom"))
+                        .on_hover_text(i18n::tr("tooltip-llm-duplicate-custom"))
+                        .clicked();
+                    let delete_clicked = ui
+                        .button(i18n::tr("btn-llm-delete-custom"))
+                        .on_hover_text(i18n::tr("tooltip-llm-delete-custom"))
+                        .clicked();
+
+                    if delete_clicked {
+                        if self.settings.llm_postprocess.remove_custom_mode(&mode_id) {
+                            self.llm_custom_error = None;
+                            self.llm_mode_loaded_id = None;
+                            self.settings.llm_postprocess.ensure_mode_valid();
+                            self.sync_llm_custom_editor();
+                            self.check_changes();
+                        } else {
+                            self.llm_custom_error = Some(i18n::tr("msg-llm-custom-delete-failed"));
+                        }
+                    }
+
+                    if duplicate_clicked {
+                        if name_trimmed.is_empty() || user_trimmed.is_empty() {
+                            self.llm_custom_error = Some(i18n::tr("msg-llm-custom-invalid"));
+                        } else {
+                            let new_id = self.settings.llm_postprocess.create_custom_mode(
+                                name_trimmed.as_str(),
+                                system_trimmed.as_str(),
+                                user_trimmed.as_str(),
+                            );
+                            self.llm_custom_error = None;
+                            self.llm_mode_loaded_id = Some(new_id.clone());
+                            self.settings.llm_postprocess.mode_id = new_id;
+                            self.sync_llm_custom_editor();
+                            self.check_changes();
+                        }
+                    }
+                }
+            });
+        } else {
+            self.llm_custom_error = None;
+        }
+
+        ui.add_space(6.0);
+        let mut max_chars = self.settings.llm_postprocess.max_input_chars as i32;
+        let mut max_changed = false;
+        ui.horizontal(|ui| {
+            ui.label(i18n::tr("label-llm-max-input"));
+            if ui
+                .add(egui::Slider::new(&mut max_chars, 500..=8000).show_value(true))
+                .changed()
+            {
+                max_changed = true;
+            }
+        });
+        if max_changed {
+            self.settings.llm_postprocess.max_input_chars = max_chars.clamp(500, 8000) as usize;
+            self.check_changes();
+        }
+
+        ui.add_space(4.0);
+        let mut timeout = self.settings.llm_postprocess.timeout_secs as i32;
+        let mut timeout_changed = false;
+        ui.horizontal(|ui| {
+            ui.label(i18n::tr("label-llm-timeout"));
+            if ui
+                .add(egui::Slider::new(&mut timeout, 3..=60).show_value(true))
+                .changed()
+            {
+                timeout_changed = true;
+            }
+            ui.small(i18n::tr("note-llm-timeout-unit"));
+        });
+        if timeout_changed {
+            self.settings.llm_postprocess.timeout_secs = timeout.clamp(3, 60) as u64;
+            self.check_changes();
+        }
+
+        ui.add_space(4.0);
+        let mut apply_autopaste = self.settings.llm_postprocess.apply_to_autopaste;
+        if ui
+            .checkbox(&mut apply_autopaste, i18n::tr("label-llm-apply-autopaste"))
+            .changed()
+        {
+            self.settings.llm_postprocess.apply_to_autopaste = apply_autopaste;
+            self.check_changes();
+        }
+
+        ui.add_space(10.0);
+        self.ui_llm_prompt_test_section(ui);
+    }
+
+    fn ui_llm_prompt_test_section(&mut self, ui: &mut egui::Ui) {
+        let mut open_flag = self.llm_prompt_test.open;
+        if ui
+            .checkbox(&mut open_flag, i18n::tr("label-llm-test-enable"))
+            .changed()
+        {
+            if open_flag {
+                self.refresh_llm_history_if_needed();
+                let len = self.llm_history_entries.len();
+                if len == 0 {
+                    self.llm_prompt_test.selected_entry = None;
+                } else if self
+                    .llm_prompt_test
+                    .selected_entry
+                    .map_or(true, |idx| idx >= len)
+                {
+                    self.llm_prompt_test.selected_entry = Some(len.saturating_sub(1));
+                }
+                self.clear_llm_prompt_test_result();
+                self.llm_prompt_test.open = true;
+            } else {
+                self.llm_prompt_test.open = false;
+            }
+        }
+        if !self.llm_prompt_test.open {
+            return;
+        }
+        self.refresh_llm_history_if_needed();
+        ui.add_space(6.0);
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.set_min_width(ui.available_width().max(360.0));
+            let history_len = self.llm_history_entries.len();
+            if history_len == 0 {
+                ui.label(i18n::tr("label-llm-test-no-history"));
+            } else {
+                let mut selected_idx = self
+                    .llm_prompt_test
+                    .selected_entry
+                    .unwrap_or(history_len - 1);
+                if selected_idx >= history_len {
+                    selected_idx = history_len - 1;
+                    self.llm_prompt_test.selected_entry = Some(selected_idx);
+                }
+                ui.label(i18n::tr("label-llm-test-select-transcript"));
+                let mut combo_selection = selected_idx;
+                let selected_text =
+                    Self::history_entry_preview(&self.llm_history_entries[selected_idx]);
+                egui::ComboBox::from_id_salt("llm_prompt_test_history")
+                    .selected_text(selected_text)
+                    .show_ui(ui, |cb| {
+                        for (idx, entry) in self.llm_history_entries.iter().enumerate().rev() {
+                            let label = Self::history_entry_preview(entry);
+                            if cb
+                                .selectable_label(combo_selection == idx, label.clone())
+                                .clicked()
+                            {
+                                combo_selection = idx;
+                            }
+                        }
+                    });
+                if combo_selection != selected_idx {
+                    selected_idx = combo_selection;
+                    self.llm_prompt_test.selected_entry = Some(selected_idx);
+                    self.clear_llm_prompt_test_result();
+                }
+                if self.llm_prompt_test.selected_entry.is_none() {
+                    self.llm_prompt_test.selected_entry = Some(selected_idx);
+                }
+                ui.add_space(6.0);
+                ui.small(i18n::tr("note-llm-test-not-saved"));
+                ui.add_space(6.0);
+                let transcript = self.llm_history_entries[selected_idx].transcript.clone();
+                let base_text_height = ui.text_style_height(&egui::TextStyle::Body);
+                let text_box_height = (base_text_height * 6.0).max(90.0);
+                let text_box_width = ui.available_width();
+                ui.label(i18n::tr("label-llm-test-transcript"));
+                let mut transcript_text = transcript.clone();
+                let transcript_widget = egui::TextEdit::multiline(&mut transcript_text)
+                    .desired_rows(6)
+                    .desired_width(text_box_width)
+                    .interactive(false);
+                ui.add_sized([text_box_width, text_box_height], transcript_widget);
+                ui.add_space(6.0);
+                let transcript_for_test = transcript.clone();
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(
+                            !self.llm_prompt_test.in_progress,
+                            egui::Button::new(i18n::tr("btn-llm-test-run")),
+                        )
+                        .clicked()
+                    {
+                        self.request_llm_prompt_test(transcript_for_test.clone());
+                    }
+                    if self.llm_prompt_test.in_progress {
+                        ui.spinner();
+                    }
+                });
+                if self.llm_prompt_test.in_progress {
+                    ui.label(i18n::tr("msg-llm-prompt-test-running"));
+                }
+                if let Some(err) = &self.llm_prompt_test.error {
+                    ui.colored_label(ui.visuals().warn_fg_color, err);
+                }
+                if let Some(latency_ms) = self.llm_prompt_test.latency_ms {
+                    let seconds = latency_ms as f32 / 1000.0;
+                    ui.label(format!(
+                        "{} {:.2}s",
+                        i18n::tr("label-llm-test-duration"),
+                        seconds
+                    ));
+                }
+                if self.llm_prompt_test.truncated_input {
+                    ui.colored_label(
+                        ui.visuals().warn_fg_color,
+                        i18n::tr("label-llm-test-truncated"),
+                    );
+                }
+                if let Some(output) = &self.llm_prompt_test.output {
+                    ui.add_space(6.0);
+                    ui.label(i18n::tr("label-llm-test-output"));
+                    let mut output_text = output.clone();
+                    let output_widget = egui::TextEdit::multiline(&mut output_text)
+                        .desired_rows(6)
+                        .desired_width(text_box_width)
+                        .interactive(false);
+                    ui.add_sized([text_box_width, text_box_height], output_widget);
+                    ui.add_space(4.0);
+                    if ui.button(i18n::tr("btn-llm-test-copy-output")).clicked() {
+                        ui.ctx().copy_text(output.clone());
+                    }
+                }
+            }
+        });
+    }
+
+    pub fn ui_section_history(&mut self, ui: &mut egui::Ui) {
+        self.refresh_llm_history_if_needed();
+        ui.add_space(8.0);
+        let heading = egui::RichText::new(i18n::tr("heading-llm-history"))
+            .color(ui.visuals().strong_text_color())
+            .strong();
+        ui.heading(heading);
+        ui.add_space(4.0);
+
+        if let Some(err) = &self.llm_history_error {
+            ui.colored_label(ui.visuals().warn_fg_color, err);
+            return;
+        }
+
+        if self.llm_history_entries.is_empty() {
+            ui.label(i18n::tr("label-llm-history-empty"));
+            return;
+        }
+
+        let base_height = ui.text_style_height(&egui::TextStyle::Body);
+        let row_height = base_height.max(18.0) * 1.3;
+        let list_height = row_height * 5.0;
+
+        let mut new_selection = self.llm_history_selected;
+        let time_column_width = 140.0;
+        egui::ScrollArea::vertical()
+            .id_salt("llm_history_scroll")
+            .max_height(list_height)
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                for (display_pos, entry) in self.llm_history_entries.iter().enumerate().rev() {
+                    let is_selected = new_selection == Some(display_pos);
+                    ui.horizontal(|row| {
+                        row.set_min_height(row_height);
+                        let preview: String = entry.transcript.chars().take(20).collect();
+                        let preview = preview.replace('\n', " ");
+                        let time_text = format!(
+                            "{} {:.2}s",
+                            i18n::tr("label-llm-history-duration-column"),
+                            entry.llm_latency_ms as f32 / 1000.0
+                        );
+                        let spacing = row.spacing().item_spacing.x;
+                        let available = row.available_width();
+                        let button_width = (available - time_column_width - spacing).max(60.0);
+                        let mut button_text = format!(
+                            "{}  {}",
+                            Self::format_history_timestamp(&entry.timestamp),
+                            preview
+                        );
+                        let max_chars = 40;
+                        if button_text.chars().count() > max_chars {
+                            let mut truncated = String::with_capacity(max_chars);
+                            for (idx, ch) in button_text.chars().enumerate() {
+                                if idx >= max_chars - 1 {
+                                    break;
+                                }
+                                truncated.push(ch);
+                            }
+                            truncated.push('…');
+                            button_text = truncated;
+                        }
+                        let btn_inner = row.allocate_ui_with_layout(
+                            egui::vec2(button_width, row_height),
+                            egui::Layout::left_to_right(egui::Align::Min),
+                            |ui_btn| {
+                                #[allow(deprecated)]
+                                ui_btn.selectable_label(is_selected, button_text.clone())
+                            },
+                        );
+                        let response = btn_inner.response.union(btn_inner.inner);
+                        if response
+                            .on_hover_text(i18n::tr("tooltip-llm-history-select-row"))
+                            .clicked()
+                        {
+                            new_selection = Some(display_pos);
+                        }
+                        row.add_space(spacing);
+                        row.allocate_ui_with_layout(
+                            egui::vec2(time_column_width, row_height),
+                            egui::Layout::left_to_right(egui::Align::Min),
+                            |label_ui| {
+                                label_ui.label(egui::RichText::new(time_text).monospace());
+                            },
+                        );
+                    });
+                    ui.separator();
+                }
+            });
+
+        if new_selection.is_none() {
+            new_selection = self.llm_history_entries.len().checked_sub(1);
+        }
+        self.llm_history_selected = new_selection;
+
+        ui.add_space(6.0);
+        ui.separator();
+        ui.add_space(6.0);
+
+        let Some(selected_index) = self.llm_history_selected else {
+            ui.label(i18n::tr("label-llm-history-select-entry"));
+            return;
+        };
+
+        let Some(entry) = self.llm_history_entries.get(selected_index) else {
+            ui.label(i18n::tr("label-llm-history-select-entry"));
+            return;
+        };
+
+        ui.heading(
+            egui::RichText::new(i18n::tr("label-llm-history-details"))
+                .color(ui.visuals().strong_text_color())
+                .strong(),
+        );
+        ui.add_space(4.0);
+
+        ui.label(format!(
+            "{} {}",
+            i18n::tr("label-llm-history-timestamp"),
+            Self::format_history_timestamp(&entry.timestamp)
+        ));
+        ui.label(format!(
+            "{} {}",
+            i18n::tr("label-llm-history-language"),
+            Self::format_history_language(&entry.settings.language_override)
+        ));
+        ui.label(format!(
+            "{} {}",
+            i18n::tr("label-llm-history-model"),
+            entry.settings.model
+        ));
+        ui.label(format!(
+            "{} {}",
+            i18n::tr("label-llm-history-mode"),
+            entry.settings.mode_label
+        ));
+        ui.label(format!(
+            "{} {}",
+            i18n::tr("label-llm-history-base-url"),
+            entry.settings.api_base_url
+        ));
+        ui.label(format!(
+            "{} {:.2}s",
+            i18n::tr("label-llm-history-latency"),
+            entry.llm_latency_ms as f32 / 1000.0
+        ));
+        if entry.truncated_input {
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                i18n::tr("label-llm-history-truncated"),
+            );
+        }
+
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if ui
+                .button(i18n::tr("btn-llm-history-copy-transcript"))
+                .on_hover_text(i18n::tr("tooltip-llm-history-copy-transcript"))
+                .clicked()
+            {
+                ui.ctx().copy_text(entry.transcript.clone());
+            }
+            if ui
+                .button(i18n::tr("btn-llm-history-copy-output"))
+                .on_hover_text(i18n::tr("tooltip-llm-history-copy-output"))
+                .clicked()
+            {
+                ui.ctx().copy_text(entry.llm_output.clone());
+            }
+        });
+
+        ui.add_space(6.0);
+        let base_text_height = ui.text_style_height(&egui::TextStyle::Body);
+        let text_box_height = (base_text_height * 6.0).max(90.0);
+
+        ui.label(i18n::tr("label-llm-history-transcript"));
+        let mut transcript_text = entry.transcript.clone();
+        let text_box_width = ui.available_width();
+        let transcript_widget = egui::TextEdit::multiline(&mut transcript_text)
+            .desired_rows(6)
+            .desired_width(text_box_width)
+            .clip_text(true)
+            .interactive(false);
+        ui.add_sized([text_box_width, text_box_height], transcript_widget);
+
+        ui.add_space(6.0);
+        ui.label(i18n::tr("label-llm-history-output"));
+        let mut output_text = entry.llm_output.clone();
+        let output_widget = egui::TextEdit::multiline(&mut output_text)
+            .desired_rows(6)
+            .desired_width(text_box_width)
+            .clip_text(true)
+            .interactive(false);
+        ui.add_sized([text_box_width, text_box_height], output_widget);
+
+        if entry.settings.custom_prompt_system.is_some()
+            || entry.settings.custom_prompt_user.is_some()
+        {
+            ui.add_space(6.0);
+            egui::CollapsingHeader::new(i18n::tr("label-llm-history-custom-prompts"))
+                .id_salt(format!("llm_hist_prompts_{}", entry.timestamp))
+                .default_open(false)
+                .show(ui, |ui| {
+                    if let Some(system) = &entry.settings.custom_prompt_system {
+                        ui.label(i18n::tr("label-llm-history-custom-system"));
+                        let mut text = system.clone();
+                        ui.add(
+                            egui::TextEdit::multiline(&mut text)
+                                .desired_rows(3)
+                                .desired_width(f32::INFINITY)
+                                .interactive(false),
+                        );
+                        ui.add_space(4.0);
+                    }
+                    if let Some(user) = &entry.settings.custom_prompt_user {
+                        ui.label(i18n::tr("label-llm-history-custom-user"));
+                        let mut text = user.clone();
+                        ui.add(
+                            egui::TextEdit::multiline(&mut text)
+                                .desired_rows(4)
+                                .desired_width(f32::INFINITY)
+                                .interactive(false),
+                        );
+                    }
+                });
+        }
+    }
+
+    fn request_llm_connection_test(&mut self) {
+        if self.llm_test_in_progress {
+            return;
+        }
+        let tx = self.llm_async_tx.clone();
+        let settings = self.settings.llm_postprocess.clone();
+        self.llm_test_in_progress = true;
+        self.llm_test_error = None;
+        self.llm_test_message = Some(i18n::tr("msg-llm-test-running"));
+        std::thread::spawn(move || {
+            let result = crate::llm::run_connection_test(&settings).map_err(|e| e.to_string());
+            let _ = tx.send(LlmUiMessage::TestResult(result));
+        });
+    }
+
+    fn request_llm_prompt_test(&mut self, transcript: String) {
+        if self.llm_prompt_test.in_progress {
+            return;
+        }
+        let tx = self.llm_async_tx.clone();
+        let settings = self.settings.llm_postprocess.clone();
+        let language_hint = self.llm_language_hint();
+        self.clear_llm_prompt_test_result();
+        self.llm_prompt_test.in_progress = true;
+        std::thread::spawn(move || {
+            let processor = LlmPostProcessor::new();
+            let result = processor
+                .process(&settings, &transcript, None, language_hint.as_deref())
+                .map_err(|err| {
+                    let mut msg = err.message;
+                    if let Some(status) = err.status {
+                        msg = format!("{} (status: {})", msg, status);
+                    }
+                    if let Some(wait) = err.retry_after_secs {
+                        msg = format!("{} (retry after {}s)", msg, wait);
+                    }
+                    msg
+                });
+            let _ = tx.send(LlmUiMessage::PromptTest(result));
+        });
+    }
+
+    fn request_llm_model_list(&mut self) {
+        if self.llm_fetching_models {
+            return;
+        }
+        let tx = self.llm_async_tx.clone();
+        let settings = self.settings.llm_postprocess.clone();
+        self.llm_fetching_models = true;
+        self.llm_fetch_error = None;
+        std::thread::spawn(move || {
+            let result = crate::llm::fetch_models(&settings).map_err(|e| e.to_string());
+            let _ = tx.send(LlmUiMessage::ModelList(result));
+        });
+    }
+
+    fn sync_llm_custom_editor(&mut self) {
+        let mode_id = self.settings.llm_postprocess.mode_id.clone();
+        if mode_id == MODE_ID_CUSTOM_DRAFT {
+            self.llm_mode_loaded_id = None;
+            if self
+                .settings
+                .llm_postprocess
+                .custom_prompt_system
+                .trim()
+                .is_empty()
+                && self.settings.llm_postprocess.custom_prompt.trim() == "{{transcript}}"
+            {
+                let language_hint = self.llm_language_hint();
+                self.settings
+                    .llm_postprocess
+                    .begin_custom_draft(language_hint.as_deref());
+                self.check_changes();
+            }
+            return;
+        }
+        if is_builtin_mode_id(&mode_id) {
+            self.llm_mode_loaded_id = None;
+            return;
+        }
+        if self.llm_mode_loaded_id.as_deref() == Some(mode_id.as_str()) {
+            return;
+        }
+        if let Some(custom) = self
+            .settings
+            .llm_postprocess
+            .custom_prompt(&mode_id)
+            .cloned()
+        {
+            self.settings.llm_postprocess.custom_prompt_name = custom.name;
+            self.settings.llm_postprocess.custom_prompt_system =
+                custom.system_prompt.unwrap_or_default();
+            self.settings.llm_postprocess.custom_prompt = custom.user_prompt;
+            self.llm_mode_loaded_id = Some(mode_id);
+        } else {
+            self.llm_mode_loaded_id = None;
+            self.settings.llm_postprocess.mode_id = MODE_ID_CUSTOM_DRAFT.to_string();
+        }
+    }
+
+    fn llm_language_hint(&self) -> Option<String> {
+        if let Some(explicit) = self
+            .settings
+            .llm_postprocess
+            .language_override
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            return Some(explicit.to_string());
+        }
+        let wl = self.settings.whisper_language.trim();
+        if wl.is_empty() || wl == "auto" {
+            None
+        } else {
+            Some(wl.to_string())
         }
     }
 
