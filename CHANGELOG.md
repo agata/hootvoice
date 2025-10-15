@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.2.0
+
+The owl picked up a few new tricks. 🦉✨ Whisper transcripts can now take a quick detour through your favorite local LLM to get cleaned up, summarized, or remixed before they land in your app.
+
+- Added an opt-in LLM post-processing engine with a local-only HTTP client, presets for formatting or summarizing, and full custom prompt support.
+- Expanded Settings with a dedicated LLM tab: configure base URL/model, control auto-paste behavior, and inspect recent history saved to disk.
+- Published a new `llm-postprocess` guide and refreshed the manual so you can get up and running with Ollama, LM Studio, and friends.
+- Trimmed unused diff logging code to keep builds leaner.
+
 ## v0.1.0
 
 HootVoice takes the stage for the very first time — cue the confetti! 🎉

@@ -11085,7 +11085,7 @@ SOFTWARE.
 
 Used by:
 
-- hootvoice 0.1.0 (https://github.com/agata/hootvoice)
+- hootvoice 0.2.0 (https://github.com/agata/hootvoice)
 
 License text:
 
@@ -12690,5 +12690,4 @@ the following restrictions:
 ```
 
 ---
-
 
